@@ -1,0 +1,35 @@
+[tool.poetry]
+name = "ddpm"
+version = "0.1.0"
+description = ""
+authors = ["bhacquin"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.8"
+torch = "^1.11.0"
+torchaudio = "^0.11.0"
+torchvision = "^0.12.0"
+wandb = "^0.14.2"
+torchgeometry = "^0.1.2"
+timm = "^0.6.13"
+tqdm = "^4.64.0"
+
+[tool.poetry.group.dev.dependencies]
+submitit = "^1.4.5"
+numpy = "^1.24.2"
+pandas = "^2.0.0"
+librosa = "^0.10.0"
+Hydra = "^2.5"
+hydra-core = "1.3.2"
+torch-dct = "^0.1.6"
+scikit-learn = "^1.2.2"
+seaborn = "^0.12.2"
+omegaconf = "^2.3.0"
+Pillow = "^9.5.0"
+opencv-python = "^4.7.0.72"
+matplotlib = "^3.7.1"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
