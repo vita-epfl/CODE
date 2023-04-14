@@ -1,0 +1,218 @@
+# @package dataset.low_quality_effect.test
+mode: set   # list of effects given in parameters, could be mode: random
+
+# Create several modified versions of the HQ audio
+# Space separated
+# equalizer, freq, Q factor, gain db
+# bass gain, freq, q factor
+# overdrive, gain db, colour db
+
+effects:
+#### TEST
+  # - name: '10'
+  #   params:
+  #     - "equalizer 200 0.7 20"
+  #     - "equalizer 4500 20 5"
+  #     - "treble -10 4000 1"  # high-cut
+  
+  # - name: '11'
+  #   params:
+  #     - "bass -20 800 1" # low-cut
+  #     - "equalizer 2000 10 -19"
+  #     - "equalizer 3000 0.7 25"
+
+  # - name: '12'
+  #   params:
+  #     - "bass -30 800 1" # low-cut
+  #     - "equalizer 2000 10 -30"
+  #     - "equalizer 3000 0.7 25"
+  #     - "overdrive 10 10"
+
+  # - name: '13'
+  #   params:
+  #     - "bass -10 1000 1" # low-cut
+  #     - "equalizer 4000 10 -30"
+  #     - "equalizer 5000 0.7 25"
+
+  # - name: '14'
+  #   params:
+  #     - "equalizer 2000 0.7 20"
+  #     - "equalizer 750 20 10"
+  #     - "treble -20 3500 1"  # high-cut
+
+
+  # Test 
+# 1 High Cut dry
+  - name: 'eq_1'
+    params: 
+      - "treble -35 2200 1"
+
+# 2 High Cut Dry with q-factor small
+  - name: 'eq_2'
+    params: 
+      - "treble -35 2500 0.5"
+
+# 3 Progressive High Cut
+  - name: 'eq_3'
+    params: 
+      - "treble -5 1000 1"
+      - "treble -15 2000 1"
+      - "treble -15 3000 1"
+      - "treble -15 5000 1"
+      - "treble -20 8000 1"
+
+# 4 Progressive of High cuts with varying q-factor
+  - name: 'eq_4'
+    params: 
+      - "treble -5 1000 0.8"
+      - "treble -15 2000 1"
+      - "treble -15 3000 0.7"
+      - "treble -15 5000 1"
+      - "treble -20 8000 1"
+
+# 5 Low Cut
+  - name: 'eq_5'
+    params: 
+      - "bass -35 700 1"
+
+# 6 Low Cut with small q-factor
+  - name: 'eq_6'
+    params: 
+      - "bass -35 800 0.7"
+
+# 7 Progressive Low cuts
+  - name: 'eq_7'
+    params: 
+      - "bass -5 450 1"
+      - "bass -5 1000 1"
+      - "bass -15 2000 1"
+      - "bass -10 3000 1"
+      - "bass -10 5000 1"
+      - "bass -5 8000 1"
+
+# Progressive Low cuts with varying q-factor
+  - name: 'eq_8'
+    params: 
+      - "bass -5 450 1"
+      - "bass -5 1000 0.8"
+      - "bass -15 2000 1"
+      - "bass -10 3000 0.6"
+      - "bass -10 5000 1"
+      - "bass -5 8000 0.7"
+
+# Random Combinaison of Low cuts
+  - name: 'eq_9'
+    params: 
+      - "bass -45 600 0.6"
+      - "bass +45 1000 0.7"
+      - "bass -20 2000 1"
+      - "bass -35 4000 0.8"
+      - "bass +45 5000 1"
+      - "bass -35 8000 1"
+
+# Mix of Low cuts and high cuts
+  - name: 'eq_10'
+    params: 
+      - "bass -35 600 1"
+      - "treble -40 8000 1"
+
+  - name: 'eq_11'
+    params: 
+      - "bass -40 2500 1"
+      - "treble -40 4000 1" 
+
+  - name: 'eq_12'
+    params: 
+      - 'bass -40 500 1'
+      - "bass -40 1000 1"
+      - "bass +20 1300 1"
+      - "treble -45 1300 1"
+
+  - name: 'eq_13'
+    params: 
+      - 'bass -40 6000 1'
+      - 'treble -40 9000 1'
+
+# Equalizers
+  - name: 'eq_14'
+    params: 
+      - "equalizer 200 0.7 20"
+      - "equalizer 450 21 -10"
+      - "equalizer 800 2 24" 
+
+  - name: 'eq_15'
+    params: 
+      - "equalizer 100 1 -20"
+      - "equalizer 4500 19 -11"
+      - "equalizer 2000 2 26"
+
+  - name: 'eq_16'
+    params: 
+      - "equalizer 100 1 -6"
+      - "equalizer 4550 21 -10"
+      - "equalizer 1900 2 27" 
+
+  - name: 'eq_17'
+    params: 
+      - "equalizer 2051 5 -30"
+      - "equalizer 1498 1 21"
+      - "equalizer 8022 2 26"
+      - "equalizer 3142 1 -42" 
+
+  - name: 'eq_18'
+    params: 
+      - "equalizer 2001 9 -31"
+      - "equalizer 2507 0.7 21"
+      - "equalizer 5130 2 -24"
+      - "equalizer 7900 2 -26"
+      - "equalizer 9000 1 17"
+
+  - name: 'eq_19'
+    params: 
+      - "equalizer 207 3 -30"
+      - "equalizer 1010 0.8 31"
+      - "equalizer 4010 2 -25"
+      - "equalizer 6000 1 15"
+
+#overdrive
+
+  - name: 'eq_20'
+    params: 
+      - 'overdrive 10 10'
+
+#MIX OF EVERYTHING
+  - name: 'eq_21'
+    params: 
+      - "bass -25 2010 1"
+      - "treble -39 3030 1"
+      - "bass 11 3007 0.7"
+      - "equalizer 2510 1 10"
+      - "equalizer 2260 5 20"
+
+  - name: 'eq_22'
+    params: 
+      - "treble -20 500 1"
+      - "treble 30 6000 0.7"
+      - "equalizer 6510 1 10"
+      - "equalizer 445 1 31"
+
+  - name: 'eq_23'
+    params: 
+      - "bass -20 800"
+      - "treble 20 1500 0.76"
+      - "equalizer 1100 10 10"
+      - "equalizer 1450 1 20"
+
+  - name: 'eq_24'
+    params: 
+      - "bass -30 400 0.8"
+      - "treble 25 5500 1"
+      - "equalizer 1400 15 8"
+
+  - name: 'eq_25'
+    params: 
+      - "bass -25 850 1"
+      - "treble -25 4000 0.8"
+      - "overdrive 15 1"
+      - "equalizer 1800 3 15"
+      - 'equalizer 2500 2 15'

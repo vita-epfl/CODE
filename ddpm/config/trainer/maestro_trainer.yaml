@@ -1,0 +1,64 @@
+defaults:
+  - base_trainer
+
+type: audio
+use_spectrogram: True
+spectrogram_power: 2
+train_clip_duration: 4  # in seconds
+validation_clip_duration: 4
+test_clip_duration: 4
+audio_timesteps: 65535
+
+
+train: True #train from scratch
+eval: False #load ckpt.pt and evaluate FID and IS
+# Dataset
+datapath: /mnt/scitas/bastien/ #help='dataset path if downloaded
+dataset: MAESTRO #help='dataset name')
+corruption: snow #help=corruption type base on Imagenet-C
+corruption_severity: 5 #help='corruption severity level 1-5'
+random_flip: False #help='Whether to use random flip in training')
+# UNet
+input_channel: 1
+ch: 64  #help='base channel of UNet')
+ch_mult: [1, 2, 2, 2, 4, 8] #help='channel multiplier')
+attn: [5] #help='add attention to these levels')
+num_res_blocks: 3 #help='# resblock in each level')
+dropout: 0.1 #help='dropout rate of resblock')
+# Gaussian Diffusion
+beta_1: 1e-4 #help='start beta value')
+beta_T: 0.02 #help='end beta value')
+T: 1000 #help='total diffusion steps')
+mean_type: epsilon #['xprev', 'xstart', 'epsilon'], help='predict variable')
+var_type: 'fixedlarge' #['fixedlarge', 'fixedsmall'], help='variance type')
+# Training
+lr: 1e-4 #help='target learning rate')
+grad_clip: 1. #help="gradient norm clipping")
+total_steps: 1000000 #help='total training steps')
+img_size: 128 #help='image size')
+warmup: 10000 #help='learning rate warmup')
+batch_size: 6 #help='batch size')
+num_workers: 32 #help='workers of Dataloader')
+ema_decay: 0.9999 #help="ema decay rate")
+parallel: True #help='multi gpu training')
+unique_img: False #help='Train a model on a single image.')
+
+#Mixed Precision
+use_half_for_matmul: True
+use_half_for_conv: True
+use_half_precision: True
+
+# Logging & Sampling
+logdir: /mnt/scitas/bastien/logs/Audio #help='log directory')
+wandb_entity: bastienvd #help='wandb id to use')
+sample_size: 8 #"sampling size of images")
+sample_step: 10000 #help='frequency of sampling')
+ml_exp_name: Spec_Diffusion_GriffinLim #help = 'name of the experience on wandb')
+checkpointpath: #/mnt/scitas/bastien/logs/Audio/ckpt_350000.pt
+
+# Evaluation
+save_step: 50000 #help='frequency of saving checkpoints, 0 to disable during training')
+eval_step: 0 #help='frequency of evaluating model, 0 to disable during training')
+num_images: 50000 #help='the number of generated images for evaluation')
+fid_use_torch: False #help='calculate IS and FID on gpu')
+fid_cache: ./stats/cifar10.train.npz #help='FID cache')

@@ -1,0 +1,11 @@
+defaults:
+  - dataset: ???
+  - trainer: base_trainer
+  # - override hydra/job_logging: custom
+  # - override hydra/help: clearaudio_help
+  - _self_
+
+
+hydra:
+  run:
+    dir: ${trainer.output_dir}/${trainer.sync_key}
