@@ -19,7 +19,6 @@ high_quality_path: /scratch/data_audio/maestro/maestro
 low_quality_path: /mnt/scitas/datasets/audio/maestro/lq
 
 collated_path: /scratch/data_audio/maestro/${dataset.name}_collated_file.csv #/mnt/scitas/datasets/audio/maestro/${dataset.name}_full_collated_V100.csv
-user_lq_suffix: ''
 use_collated_file: true
 no_lq_file: true
 

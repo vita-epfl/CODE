@@ -12,7 +12,7 @@ LOG = logging.getLogger(__name__)
 
 
 @record
-@hydra.main(config_path="config", config_name="config")
+@hydra.main(config_path="./ddpm/config", config_name="config")
 def main(cfg: DictConfig) -> int:
     if cfg.trainer.type == "audio" :
         trainer = AudioTrainer(cfg)
