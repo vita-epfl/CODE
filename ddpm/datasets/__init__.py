@@ -39,8 +39,6 @@ def get_dataset(args, cfg):
     random_flip = args.random_flip
     lower_image_size = args.lower_image_size
     image_size = args.img_size
-
-    print('dataset_name',dataset_name)
     if random_flip is False:
         train_transform = test_transform = transforms.Compose(
             [transforms.Resize(image_size), transforms.ToTensor()]
@@ -132,7 +130,6 @@ def get_dataset(args, cfg):
             download=False,
         )
     elif dataset_name == "MAESTRO":
-        print("dataset_name", dataset_name)
         dataset = AudioDataset(cfg)
         if dataset.should_build_dataset():
             dataset.build_collated()
@@ -141,8 +138,7 @@ def get_dataset(args, cfg):
     elif dataset_name == "CITYSCAPES_ORIGINAL":
         if cfg.dataset.mode == "fine":
             dataset = Cityscapes(root=cfg.dataset.root_dir, split='train', mode=cfg.dataset.mode,
-                     target_type='semantic', transforms=transforms.Compose([transforms.ToTensor(),]),)
-# transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))   
+                     target_type='semantic', transforms=transforms.Compose([transforms.ToTensor(),]),)  
             val_dataset = Cityscapes(root=cfg.dataset.root_dir, split='val', mode=cfg.dataset.mode,
                      target_type='semantic', transforms=transforms.Compose([transforms.ToTensor(),]),)
             
@@ -155,6 +151,7 @@ def get_dataset(args, cfg):
             raise NotImplementedError
 
     elif dataset_name == "CITYSCAPES_PRETRAINING":
+        print("dataset_name :", dataset_name)
         if cfg.trainer.random_flip:
             train_transform =  transforms.Compose(
                 [
@@ -162,15 +159,24 @@ def get_dataset(args, cfg):
                     transforms.RandomHorizontalFlip(p=0.5),
                     transforms.RandomCrop(image_size),
                     transforms.ToTensor(),
-                    transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
                 ]
             )
-            test_transform = transforms.Compose(
-                [transforms.Resize(lower_image_size), 
-                transforms.RandomCrop(image_size),
-                transforms.ToTensor(),
-                transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]
+        else:
+            train_transform =  transforms.Compose(
+                [
+                    transforms.Resize(lower_image_size),
+                    transforms.RandomCrop(image_size),
+                    transforms.ToTensor(),
+                ]
             )
+
+        test_transform = transforms.Compose(
+            [transforms.Resize(lower_image_size), 
+            transforms.RandomCrop(image_size),
+            transforms.ToTensor(),
+            ]
+        )
+        
         dataset = Cityscapes_Pretraining_Dataset(cfg, transform = train_transform)
         test_dataset = Cityscapes_Pretraining_Dataset(cfg,transform = test_transform, split = "test")
     

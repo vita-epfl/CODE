@@ -5,6 +5,9 @@ import warnings
 import wandb
 from absl import app, flags
 from omegaconf import DictConfig, open_dict
+import logging
+import hydra
+import submitit
 
 import torch
 from tensorboardX import SummaryWriter
@@ -13,10 +16,10 @@ from torchvision.utils import make_grid, save_image
 from torchvision import transforms
 from tqdm import trange
 
-from datasets import get_dataset
-from diffusion import GaussianDiffusionTrainer, GaussianDiffusionSampler, HeatDiffusionTrainer, HeatDiffusionSampler
-from model import UNet
-from score.both import get_inception_and_fid_score
+from ddpm.datasets import get_dataset
+from ddpm.diffusion import GaussianDiffusionTrainer, GaussianDiffusionSampler, HeatDiffusionTrainer, HeatDiffusionSampler
+from ddpm.model import UNet
+from ddpm.score.both import get_inception_and_fid_score
 
 
 FLAGS = flags.FLAGS
@@ -25,7 +28,7 @@ flags.DEFINE_bool('eval', False, help='load ckpt.pt and evaluate FID and IS')
 # Dataset
 flags.DEFINE_string('datapath', '/mnt/scitas/bastien/', help='dataset path if downloaded')
 flags.DEFINE_string('dataset', 'CELEBA', help='dataset name')
-flags.DEFINE_string('corruption', 'snow', help='corruption type base on Imagenet-C')
+flags.DEFINE_string('corruption', '', help='corruption type base on Imagenet-C')
 flags.DEFINE_integer('corruption_severity', 5, help='corruption severity level 1-5')
 flags.DEFINE_bool('random_flip', False, help='Whether to use random flip in training')
 # UNet
@@ -45,6 +48,7 @@ flags.DEFINE_float('lr', 2e-4, help='target learning rate')
 flags.DEFINE_float('grad_clip', 1., help="gradient norm clipping")
 flags.DEFINE_integer('total_steps', 800000, help='total training steps')
 flags.DEFINE_integer('img_size', 64, help='image size')
+flags.DEFINE_integer('lower_image_size',256, help='resize image before crop')
 flags.DEFINE_integer('warmup', 5000, help='learning rate warmup')
 flags.DEFINE_integer('batch_size', 64, help='batch size')
 flags.DEFINE_integer('num_workers', 32, help='workers of Dataloader')
@@ -52,11 +56,11 @@ flags.DEFINE_float('ema_decay', 0.9999, help="ema decay rate")
 flags.DEFINE_bool('parallel', True, help='multi gpu training')
 flags.DEFINE_bool('unique_img', False, help='Train a model on a single image.')
 # Logging & Sampling
-flags.DEFINE_string('logdir', '/mnt/scitas/bastien/logs/Celeba_Gaussian_Snow', help='log directory')
+flags.DEFINE_string('logdir', '/mnt/scitas/bastien/logs/Celeba', help='log directory')
 flags.DEFINE_string('wandb_entity', 'bastienvd', help='wandb id to use')
 flags.DEFINE_integer('sample_size', 64, "sampling size of images")
 flags.DEFINE_integer('sample_step', 10000, help='frequency of sampling')
-flags.DEFINE_string('ml_exp_name', 'CelebA_Gaussian_Snow', help = 'name of the experience on wandb')
+flags.DEFINE_string('ml_exp_name', 'CelebA', help = 'name of the experience on wandb')
 # Evaluation
 flags.DEFINE_integer('save_step', 50000, help='frequency of saving checkpoints, 0 to disable during training')
 flags.DEFINE_integer('eval_step', 0, help='frequency of evaluating model, 0 to disable during training')
@@ -114,7 +118,7 @@ def train():
     #         transforms.ToTensor(),
     #         transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
     #     ]))
-    dataset, test_dataset = get_dataset(FLAGS)
+    dataset, test_dataset = get_dataset(FLAGS, cfg=None)
     print("dataset length",len(dataset))
     dataloader = torch.utils.data.DataLoader(
         dataset, batch_size=FLAGS.batch_size, shuffle=True,
@@ -264,8 +268,8 @@ def eval():
         os.path.join(FLAGS.logdir, 'samples_ema.png'),
         nrow=16)
 
-@hydra.main(config_path="config", config_name="config")
-def main(cfg: DictConfig):
+
+def main(args):
     # suppress annoying inception_v3 initialization warning
     warnings.simplefilter(action='ignore', category=FutureWarning)
     os.makedirs(os.path.join(FLAGS.logdir, 'sample'), exist_ok=True)

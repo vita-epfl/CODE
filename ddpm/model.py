@@ -226,10 +226,8 @@ class UNet(nn.Module):
         # Downsampling
         h = self.head(x)
         hs = [h]
-        # print('head', h.shape)
         for layer in self.downblocks:
             h = layer(h, temb)
-            # print('downblocks', h.shape)
             hs.append(h)
         # Middle
         for layer in self.middleblocks:
@@ -237,8 +235,6 @@ class UNet(nn.Module):
         # Upsampling
         for layer in self.upblocks:
             if isinstance(layer, ResBlock):
-                # print("h",h.shape)
-                # print("hs",hs[-1].shape)
                 h = torch.cat([h, hs.pop()], dim=1)
             h = layer(h, temb)
         h = self.tail(h)

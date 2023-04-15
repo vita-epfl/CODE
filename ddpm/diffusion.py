@@ -126,8 +126,6 @@ class GaussianDiffusionTrainer(nn.Module):
             extract(self.sqrt_alphas_bar, t, x_0.shape) * x_0 +
             extract(self.sqrt_one_minus_alphas_bar, t, x_0.shape) * noise)
         output = self.model(x_t, t)
-        # print('output',output.shape)
-        # print('noise',noise.shape)
         loss = F.mse_loss(output, noise, reduction='none')
         return loss
 
@@ -578,7 +576,7 @@ class HeatDiffusionSampler(nn.Module):
             t = torch.tensor(t, device=z_T.device).unsqueeze(0)
             out = self.denoise(z_t, t/self.T)
             z_t = out['sample']
-        return torch.clip(z_t, -1000, 1000)
+        return torch.clip(z_t, -10, 10)
 
 
 class GaussianDiffusionSampler(nn.Module):
@@ -969,7 +967,7 @@ class GaussianDiffusionSampler(nn.Module):
                 yield out
                 image = out["sample"]
 
-    def forward(self, x_T, clip_value = 100., clip_sampling = False):
+    def forward(self, x_T, clip_value = 1., clip_sampling = False):
         """
         Algorithm 2.
         """

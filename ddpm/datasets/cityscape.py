@@ -3,21 +3,25 @@ from typing import Dict, List, Tuple, Any, Optional, Union, Callable
 import os
 import PIL
 from collections import namedtuple
-
+from omegaconf import OmegaConf
 from .corruptions import *
 from PIL import Image
 from .vision import VisionDataset
 from .utils import download_file_from_google_drive, check_integrity
 from torchvision.datasets.utils import extract_archive, iterable_to_str, verify_str_arg
 import torchvision
+import torchvision.transforms as transforms
 
 class Cityscapes_Pretraining_Dataset(VisionDataset):
     def __init__(self, cfg, root: Optional[str] = None, 
                             split: Optional[str] = None, 
                             corruption: Optional[str] = None, 
                             corruption_severity: Optional[int] = None,
-                            transform: Optional[Callable] = None):
-        
+                            transform: Optional[Callable] = None,
+                            inv_transform: Optional[Callable] = None):
+        self.cfg = cfg
+        self.lower_image_size = OmegaConf.to_object(self.cfg.trainer.lower_image_size)
+        self.img_size = OmegaConf.to_object(self.cfg.trainer.img_size)
         if root is not None:
             self.root = root
         else:
@@ -43,7 +47,7 @@ class Cityscapes_Pretraining_Dataset(VisionDataset):
         if transform is not None:
             self.transform = transform
         else:
-            self.transform 
+            self.transform = None
             
         self.images = []
         valid_splits = ("train", "test", "val", "train_val", "all")
@@ -103,7 +107,7 @@ class Cityscapes_Pretraining_Dataset(VisionDataset):
                 X = PIL.Image.fromarray(elastic_transform(X, severity  = self.corruption_severity).astype(np.uint8))
             elif self.corruption == "snow":
                 X = PIL.Image.fromarray(snow(X, severity  = self.corruption_severity).astype(np.uint8))
-        
+
         if self.transform is not None:
             image = self.transform(X)
             image_original = self.transform(X_original)

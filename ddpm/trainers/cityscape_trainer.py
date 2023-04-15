@@ -54,7 +54,7 @@ def infiniteloop(dataloader, target: bool = False, corrupted_image : bool = Fals
     else:
         while True:
             for x, y in iter(dataloader):
-                yield x
+                yield x, y
 
 
 def create_dataloader(dataset: Dataset,
@@ -105,6 +105,8 @@ class Cityscape_Trainer(BaseTrainer):
         if self.cfg.trainer.use_half_precision:
             self.scaler = torch.cuda.amp.GradScaler()
             self.half_precision = True
+        else:
+            self.half_precision = False
 
         LOG.info(f"CityscapeTrainer: {self.cfg.trainer.rank}, gpu: {self.cfg.trainer.gpu}")
         warnings.simplefilter(action='ignore', category=FutureWarning)
@@ -125,11 +127,10 @@ class Cityscape_Trainer(BaseTrainer):
         if self.cfg.trainer.gpu is not None:
             torch.cuda.set_device(self.cfg.trainer.gpu)
 
-        #TODO: Fix get_dataset function for cfg usage
         self.dataset, self.dataset_test = get_dataset(None, self.cfg)
         print("train dataset length",len(self.dataset))
-        print("test dataset length",len(self.dataset))
-        # self.dataset_test = copy.deepcopy(self.dataset)
+        print("test dataset length",len(self.dataset_test))
+
         self.train_dataloader = create_dataloader(
                 self.dataset,
                 rank=self.cfg.trainer.rank,
@@ -150,7 +151,8 @@ class Cityscape_Trainer(BaseTrainer):
         
         # model setup
         self.net_model = UNet(
-            T=self.cfg.trainer.T, ch=self.cfg.trainer.ch, ch_mult=self.cfg.trainer.ch_mult, attn=self.cfg.trainer.attn,
+            T=self.cfg.trainer.T, ch=self.cfg.trainer.ch, ch_mult=OmegaConf.to_object(self.cfg.trainer.ch_mult), attn=
+            OmegaConf.to_object(self.cfg.trainer.attn),
             num_res_blocks=self.cfg.trainer.num_res_blocks, dropout=self.cfg.trainer.dropout, input_channel=self.cfg.trainer.input_channel)
         self.ema_model = copy.deepcopy(self.net_model)
         self.optimizer = torch.optim.Adam(self.net_model.parameters(), lr=self.cfg.trainer.lr)
@@ -192,47 +194,53 @@ class Cityscape_Trainer(BaseTrainer):
 
         # log setup 
         #TODO: automate the size
-        x_T = torch.randn(self.cfg.trainer.sample_size, 1, 256, 512)
+        x_T = torch.randn(self.cfg.trainer.sample_size, self.cfg.trainer.input_channel, self.cfg.trainer.img_size[0], self.cfg.trainer.img_size[1])
         self.x_T = x_T.cuda(self.cfg.trainer.gpu)
+
+    
+        # show model size
+        model_size = 0
+        for param in self.net_model.parameters():
+            model_size += param.data.nelement()
+        print('Model params: %.2f M' % (model_size / 1024 / 1024))
 
 
     def train(self,) -> None:
+        self.net_model.train()
+        self.optimizer.zero_grad()
         for step in range(self.cfg.trainer.total_steps):
-        # with trange(self.cfg.trainer.total_steps, dynamic_ncols=True) as pbar:
-        #     for step in pbar:
-                # train
-            self.optimizer.zero_grad()
             start_time = time.time()
-
-            if self.cfg.trainer.unique_img:
-                x_0 = dataset[0][0].unsqueeze(0)
-            else:
-                x_0 = next(self.datalooper)
-
+            x_0, _ = next(self.datalooper)
+            
             loading_time = time.time() - start_time
 
-
-            if self.x_T.shape != x_0.shape:
+            if self.x_T[0].shape != x_0[0].shape:
+                print(f"Issue with x_T shape, {self.x_T.shape} but {x_0.shape} needed.")
                 self.x_T = torch.randn_like(x_0).cuda(self.cfg.trainer.gpu)
 
             x_0 = x_0.cuda(self.cfg.trainer.gpu)
             start_time = time.time()
+
             if self.half_precision:
                 with torch.cuda.amp.autocast():
-                    loss = self.diffusion_trainer(x_0).mean()
+                    loss = self.diffusion_trainer(x_0).mean() / self.cfg.trainer.accumulating_step
                     diffusion_time = time.time() - start_time
                 self.scaler.scale(loss).backward()
-                self.scaler.step(self.optimizer)
-                self.scaler.update()
-                self.sched.step()
             else:
-                loss = self.diffusion_trainer(x_0).mean()
+                loss = self.diffusion_trainer(x_0).mean() / self.cfg.trainer.accumulating_step
                 diffusion_time = time.time() - start_time
                 loss.backward()
-                torch.nn.utils.clip_grad_norm_(
-                    self.net_model.parameters(), self.cfg.trainer.grad_clip)
-                self.optimizer.step()
-                self.sched.step()
+            
+            if (step + 1) % self.cfg.trainer.accumulating_step == 0:
+                if self.half_precision:
+                    self.scaler.step(self.optimizer)
+                    self.scaler.update()
+                    self.sched.step()
+                else:
+                    torch.nn.utils.clip_grad_norm_(self.net_model.parameters(), self.cfg.trainer.grad_clip)
+                    self.optimizer.step()
+                    self.sched.step()
+                self.optimizer.zero_grad()
 
             ema(self.net_model, self.ema_model, self.cfg.trainer.ema_decay)
 
@@ -240,9 +248,7 @@ class Cityscape_Trainer(BaseTrainer):
             if self.writer is not None:
                 self.writer.add_scalar('diffusion_time', diffusion_time, step)
                 self.writer.add_scalar('loading_time', loading_time, step)
-                self.writer.add_scalar('loss', loss, step)
-
-            # pbar.set_postfix(loss='%.3f' % loss)
+                self.writer.add_scalar('loss', loss*self.cfg.trainer.accumulating_step, step)
 
             # sample
             if self.cfg.trainer.sample_step > 0 and step % self.cfg.trainer.sample_step == 0:                
@@ -251,6 +257,7 @@ class Cityscape_Trainer(BaseTrainer):
                     grid_ori = make_grid(x_0) #(make_grid(x_0) + 1) / 2
                     img_grid_ori = wandb.Image(grid_ori.permute(1,2,0).cpu().numpy())
                     wandb.log({"Original_Image": img_grid_ori}) 
+
                 if step > 0 :
                     with torch.no_grad():
                         if self.half_precision:
