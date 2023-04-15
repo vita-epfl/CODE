@@ -250,6 +250,8 @@ class Cityscape_Trainer(BaseTrainer):
                 self.writer.add_scalar('loading_time', loading_time, step)
                 self.writer.add_scalar('loss', loss*self.cfg.trainer.accumulating_step, step)
 
+            if step % 100 == 0:
+                print("loss :",loss)
             # sample
             if self.cfg.trainer.sample_step > 0 and step % self.cfg.trainer.sample_step == 0:                
                 self.net_model.eval()

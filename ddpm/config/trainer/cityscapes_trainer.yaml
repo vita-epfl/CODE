@@ -38,18 +38,19 @@ num_workers: 32 #help='workers of Dataloader')
 ema_decay: 0.9999 #help="ema decay rate")
 parallel: True #help='multi gpu training')
 unique_img: False #help='Train a model on a single image.')
-accumulating_step: 4
+accumulating_step: 8
+
 #Mixed Precision
 use_half_for_matmul: False
 use_half_for_conv: False
-use_half_precision: True
+use_half_precision: False
 
 # Logging & Sampling
 logdir: /mnt/scitas/bastien/logs/Cityscapes #help='log directory')
 wandb_entity: bastienvd #help='wandb id to use')
 sample_size: 8 #"sampling size of images")
 sample_step: 10000 #help='frequency of sampling')
-ml_exp_name: Cityscape_Diffusion #help = 'name of the experience on wandb')
+ml_exp_name: Cityscape_Diffusion_fullprecision #help = 'name of the experience on wandb')
 checkpointpath: #/mnt/scitas/bastien/logs/Audio/ckpt_350000.pt
 
 # Evaluation
