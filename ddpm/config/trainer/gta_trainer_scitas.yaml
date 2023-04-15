@@ -7,13 +7,13 @@ type: cityscape
 train: True #train from scratch
 eval: False #load ckpt.pt and evaluate FID and IS
 # Dataset
-datapath: /work/vita/datasets/cityscapes_full #help='dataset path if downloaded
-dataset: CITYSCAPES_PRETRAINING #help='dataset name')
+datapath: /work/vita/datasets/gta5 #help='dataset path if downloaded
+dataset: GTA #help='dataset name')
 split: all
 corruption:  #help=corruption type base on Imagenet-C
 corruption_severity:  #help='corruption severity level 1-5'
 random_flip: False #help='Whether to use random flip in training')
-lower_image_size: [256,512]
+lower_image_size: [270,430]
 img_size: [256, 256] #help='image size')
 
 # UNet
@@ -50,7 +50,7 @@ logdir: /work/vita/bastien/logs/Cityscapes #help='log directory')
 wandb_entity: bastienvd #help='wandb id to use')
 sample_size: 8 #"sampling size of images")
 sample_step: 10000 #help='frequency of sampling')
-ml_exp_name: Cityscape_Diffusion_scitas #help = 'name of the experience on wandb')
+ml_exp_name: GTA_Diffusion_scitas #help = 'name of the experience on wandb')
 checkpointpath: #/mnt/scitas/bastien/logs/Audio/ckpt_350000.pt
 
 # Evaluation
@@ -62,7 +62,7 @@ fid_cache: ./stats/cifar10.train.npz #help='FID cache')
 
 # Mode slurm
 slurm:
-  nodes: 4 # 2
+  nodes: 1 # 2
   gpus_per_node: 2  # max 2
   cpus_per_task: 10
   mem: 72 # in GiB 48

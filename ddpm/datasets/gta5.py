@@ -68,7 +68,7 @@ class GTA_Pretraining_Dataset(VisionDataset):
             self.images.append(os.path.join(self.images_dir, file_name))
 
 
-   def __getitem__(self, index: int) -> Any:
+    def __getitem__(self, index: int) -> Any:
         """
         Args:
             index (int): Index

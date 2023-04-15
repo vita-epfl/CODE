@@ -129,7 +129,7 @@ class Cityscape_Trainer(BaseTrainer):
 
         self.dataset, self.dataset_test = get_dataset(None, self.cfg)
         print("train dataset length",len(self.dataset))
-        print("test dataset length",len(self.dataset_test))
+        
 
         self.train_dataloader = create_dataloader(
                 self.dataset,
@@ -138,17 +138,20 @@ class Cityscape_Trainer(BaseTrainer):
                 world_size=self.cfg.trainer.world_size,
                 batch_size=self.cfg.trainer.batch_size,
             )
-
-        self.test_dataloader = create_dataloader(
-                self.dataset_test,
-                rank=self.cfg.trainer.rank,
-                max_workers=self.cfg.trainer.num_workers,
-                world_size=self.cfg.trainer.world_size,
-                batch_size=self.cfg.trainer.batch_size,
-            )
-
         self.datalooper = infiniteloop(self.train_dataloader)
         
+        if self.dataset_test is not None:
+            print("test dataset length",len(self.dataset_test))
+            self.test_dataloader = create_dataloader(
+                    self.dataset_test,
+                    rank=self.cfg.trainer.rank,
+                    max_workers=self.cfg.trainer.num_workers,
+                    world_size=self.cfg.trainer.world_size,
+                    batch_size=self.cfg.trainer.batch_size,
+                )
+        else:
+            self.test_dataloader = self.train_dataloader
+            self.dataset_test = self.dataset
         # model setup
         self.net_model = UNet(
             T=self.cfg.trainer.T, ch=self.cfg.trainer.ch, ch_mult=OmegaConf.to_object(self.cfg.trainer.ch_mult), attn=
