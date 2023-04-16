@@ -119,7 +119,7 @@ class Cityscape_Trainer(BaseTrainer):
                 from clearml import Task
                 task = Task.init(project_name="Cityscape_Diffusion", task_name=self.cfg.trainer.ml_exp_name)
             if self.cfg.trainer.use_wandb:
-                wandb.init(project="Cityscape_Diffusion", entity=self.cfg.trainer.wandb_entity, sync_tensorboard=True)
+                wandb.init(project="Diffusion_Dataset", entity=self.cfg.trainer.wandb_entity, sync_tensorboard=True)
                 wandb.run.name = self.cfg.trainer.ml_exp_name
                 wandb.run.save()
             self.writer = SummaryWriter(self.cfg.trainer.logdir)
@@ -214,7 +214,7 @@ class Cityscape_Trainer(BaseTrainer):
         for step in range(self.cfg.trainer.total_steps):
             start_time = time.time()
             x_0, _ = next(self.datalooper)
-            
+            previous_loss = 1.
             loading_time = time.time() - start_time
 
             if self.x_T[0].shape != x_0[0].shape:
@@ -233,7 +233,13 @@ class Cityscape_Trainer(BaseTrainer):
                 loss = self.diffusion_trainer(x_0).mean() / self.cfg.trainer.accumulating_step
                 diffusion_time = time.time() - start_time
                 loss.backward()
-            
+
+            if previous_loss < 10*loss.data.cpu().item():
+                if self.writer is not None:
+                    grid_ori_pb = make_grid(x_0) #(make_grid(x_0) + 1) / 2
+                    img_grid_ori_pb = wandb.Image(grid_ori_pb.permute(1,2,0).cpu().numpy())
+                    wandb.log({"Problem_Image": img_grid_ori_pb}) 
+
             if (step + 1) % self.cfg.trainer.accumulating_step == 0:
                 if self.half_precision:
                     self.scaler.step(self.optimizer)
@@ -251,7 +257,7 @@ class Cityscape_Trainer(BaseTrainer):
             if self.writer is not None:
                 self.writer.add_scalar('diffusion_time', diffusion_time, step)
                 self.writer.add_scalar('loading_time', loading_time, step)
-                self.writer.add_scalar('loss', loss*self.cfg.trainer.accumulating_step, step)
+                self.writer.add_scalar('loss', (loss*self.cfg.trainer.accumulating_step).data.cpu().item(), step)
 
             if step % 100 == 0:
                 print("loss :",loss)

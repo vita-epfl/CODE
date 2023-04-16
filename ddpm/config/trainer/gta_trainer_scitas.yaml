@@ -1,6 +1,6 @@
 defaults:
   - base_trainer
-
+name: gta_diffusion
 platform: slurm
 type: cityscape
 
@@ -46,7 +46,7 @@ use_half_for_conv: False
 use_half_precision: True
 
 # Logging & Sampling
-logdir: /work/vita/bastien/logs/Cityscapes #help='log directory')
+logdir: /work/vita/bastien/logs/GTA #help='log directory')
 wandb_entity: bastienvd #help='wandb id to use')
 sample_size: 8 #"sampling size of images")
 sample_step: 10000 #help='frequency of sampling')
@@ -62,11 +62,11 @@ fid_cache: ./stats/cifar10.train.npz #help='FID cache')
 
 # Mode slurm
 slurm:
-  nodes: 1 # 2
+  nodes: 2 # 2
   gpus_per_node: 2  # max 2
   cpus_per_task: 10
   mem: 72 # in GiB 48
-  timeout: 72 # hours
+  timeout: 48 # hours
   partition: gpu
   qos: gpu
   account: vita # optional
