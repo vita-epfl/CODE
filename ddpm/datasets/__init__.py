@@ -188,10 +188,12 @@ def get_dataset(args, cfg):
     elif dataset_name == "GTA":
         print("dataset_name :", dataset_name)
         first_crop = args.first_crop
+        original_img_size = args.original_img_size
         if first_crop is not None:
             if cfg.trainer.random_flip:
                 train_transform =  transforms.Compose(
-                    [   transforms.RandomCrop(first_crop),
+                    [   transforms.Resize(original_img_size),
+                        transforms.RandomCrop(first_crop),
                         transforms.Resize(lower_image_size),
                         transforms.RandomHorizontalFlip(p=0.5),
                         transforms.RandomCrop(image_size),
@@ -200,7 +202,8 @@ def get_dataset(args, cfg):
                 )
             else:
                 train_transform =  transforms.Compose(
-                    [   transforms.RandomCrop(first_crop),
+                    [   transforms.Resize(original_img_size),
+                        transforms.RandomCrop(first_crop),
                         transforms.Resize(lower_image_size),
                         transforms.RandomCrop(image_size),
                         transforms.ToTensor(),
@@ -209,7 +212,7 @@ def get_dataset(args, cfg):
         else:
             if cfg.trainer.random_flip:
                 train_transform =  transforms.Compose(
-                    [
+                    [   transforms.Resize(original_img_size),
                         transforms.Resize(lower_image_size),
                         transforms.RandomHorizontalFlip(p=0.5),
                         transforms.RandomCrop(image_size),
@@ -218,7 +221,7 @@ def get_dataset(args, cfg):
                 )
             else:
                 train_transform =  transforms.Compose(
-                    [
+                    [   transforms.Resize(original_img_size),
                         transforms.Resize(lower_image_size),
                         transforms.RandomCrop(image_size),
                         transforms.ToTensor(),

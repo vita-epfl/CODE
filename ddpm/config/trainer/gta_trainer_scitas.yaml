@@ -14,7 +14,7 @@ corruption:  #help=corruption type base on Imagenet-C
 corruption_severity:  #help='corruption severity level 1-5'
 random_flip: False #help='Whether to use random flip in training')
 
-#original_img_size [1052,1914]
+original_img_size: [1052,1914]
 first_crop: [1024,1904]
 lower_image_size: [64, 119] #[270,430]
 img_size: [64, 64] #help='image size')
