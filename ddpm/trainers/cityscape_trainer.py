@@ -300,6 +300,7 @@ class Cityscape_Trainer(BaseTrainer):
                     'optim': self.optimizer.state_dict(),
                     'step': step,
                     'x_T': self.x_T,
+                    "config": OmegaConf.to_container(self.cfg)
                 }
                 torch.save(ckpt, os.path.join(self.cfg.trainer.logdir, f'ckpt_{step}.pt'))
 
