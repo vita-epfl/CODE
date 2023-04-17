@@ -40,6 +40,7 @@ def get_dataset(args, cfg):
     random_flip = args.random_flip
     lower_image_size = args.lower_image_size
     image_size = args.img_size
+    original_img_size = args.original_img_size
     if random_flip is False:
         train_transform = test_transform = transforms.Compose(
             [transforms.Resize(image_size), transforms.ToTensor()]
@@ -155,7 +156,7 @@ def get_dataset(args, cfg):
         print("dataset_name :", dataset_name)
         if cfg.trainer.random_flip:
             train_transform =  transforms.Compose(
-                [
+                [   transforms.Resize(original_img_size),
                     transforms.Resize(lower_image_size),
                     transforms.RandomHorizontalFlip(p=0.5),
                     transforms.RandomCrop(image_size),
@@ -164,7 +165,7 @@ def get_dataset(args, cfg):
             )
         else:
             train_transform =  transforms.Compose(
-                [
+                [   transforms.Resize(original_img_size),
                     transforms.Resize(lower_image_size),
                     transforms.RandomCrop(image_size),
                     transforms.ToTensor(),
@@ -172,7 +173,9 @@ def get_dataset(args, cfg):
             )
 
         test_transform = transforms.Compose(
-            [transforms.Resize(lower_image_size), 
+            [
+            transforms.Resize(original_img_size),
+            transforms.Resize(lower_image_size), 
             transforms.RandomCrop(image_size),
             transforms.ToTensor(),
             ]
@@ -188,7 +191,6 @@ def get_dataset(args, cfg):
     elif dataset_name == "GTA":
         print("dataset_name :", dataset_name)
         first_crop = args.first_crop
-        original_img_size = args.original_img_size
         if first_crop is not None:
             if cfg.trainer.random_flip:
                 train_transform =  transforms.Compose(
