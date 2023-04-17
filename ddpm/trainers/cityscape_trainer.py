@@ -237,13 +237,13 @@ class Cityscape_Trainer(BaseTrainer):
                 diffusion_time = time.time() - start_time
                 loss.backward()
 
-            if (previous_loss < 80*loss.data.cpu().item()) and (step >0):
-                if self.writer is not None:
-                    grid_ori_pb = make_grid(x_0) #(make_grid(x_0) + 1) / 2
-                    img_grid_ori_pb = wandb.Image(grid_ori_pb.permute(1,2,0).cpu().numpy())
-                    wandb.log({"Problem_Image": img_grid_ori_pb}) 
+            # if (previous_loss < 100*loss.data.cpu().item()) and (step >0):
+            #     if self.writer is not None:
+            #         grid_ori_pb = make_grid(x_0) #(make_grid(x_0) + 1) / 2
+            #         img_grid_ori_pb = wandb.Image(grid_ori_pb.permute(1,2,0).cpu().numpy())
+            #         wandb.log({"Problem_Image": img_grid_ori_pb}) 
 
-            previous_loss = loss.data.cpu().item()
+            # previous_loss = loss.data.cpu().item()
 
             if (step + 1) % self.cfg.trainer.accumulating_step == 0:
                 if self.half_precision:
