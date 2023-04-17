@@ -118,11 +118,11 @@ class ResBlock(nn.Module):
     def __init__(self, in_ch, out_ch, tdim, dropout, attn=False, use_time_embedding=True, kernel_size=3):
         super().__init__()
         self.use_time_embedding = use_time_embedding
-
+        self.pad = int((kernel_size-1)/2)
         self.block1 = nn.Sequential(
             nn.GroupNorm(32, in_ch),
             Swish(),
-            nn.Conv2d(in_ch, out_ch, kernel_size, stride=1, padding=1),
+            nn.Conv2d(in_ch, out_ch, kernel_size, stride=1, padding=self.pad),
         )
         if self.use_time_embedding:
             self.temb_proj = nn.Sequential(
@@ -133,7 +133,7 @@ class ResBlock(nn.Module):
             nn.GroupNorm(32, out_ch),
             Swish(),
             nn.Dropout(dropout),
-            nn.Conv2d(out_ch, out_ch, kernel_size, stride=1, padding=1),
+            nn.Conv2d(out_ch, out_ch, kernel_size, stride=1, padding=self.pad),
         )
         if in_ch != out_ch:
             self.shortcut = nn.Conv2d(in_ch, out_ch, 1, stride=1, padding=0)
@@ -171,13 +171,13 @@ class UNet(nn.Module):
         self.use_time_embedding = use_time_embedding
         if self.use_time_embedding:
             self.time_embedding = TimeEmbedding(T, ch, tdim)
-        self.head = nn.Conv2d(input_channel, ch, kernel_size=3, stride=1, padding= int(kernel_size-1/2))
+        self.head = nn.Conv2d(input_channel, ch, kernel_size=kernel_size, stride=1, padding= int((kernel_size-1)/2))
         self.downblocks = nn.ModuleList()
         chs = [ch]  # record output channel when dowmsample for upsample
         now_ch = ch
         for i, mult in enumerate(ch_mult):
             out_ch = ch * mult
-            for _ in range(num_res_blocks)
+            for _ in range(num_res_blocks):
                 self.downblocks.append(ResBlock(
                     in_ch=now_ch, out_ch=out_ch, tdim=tdim,
                     dropout=dropout, attn=(i in attn),kernel_size=kernel_size))
@@ -188,8 +188,8 @@ class UNet(nn.Module):
                 chs.append(now_ch)
 
         self.middleblocks = nn.ModuleList([
-            ResBlock(now_ch, now_ch, tdim, dropout, attn=True, kernel_size=3),
-            ResBlock(now_ch, now_ch, tdim, dropout, attn=False,kernel_size=3),
+            ResBlock(now_ch, now_ch, tdim, dropout, attn=True, kernel_size=kernel_size),
+            ResBlock(now_ch, now_ch, tdim, dropout, attn=False,kernel_size=kernel_size),
         ])
 
         self.upblocks = nn.ModuleList()
@@ -207,7 +207,7 @@ class UNet(nn.Module):
         self.tail = nn.Sequential(
             nn.GroupNorm(32, now_ch),
             Swish(),
-            nn.Conv2d(now_ch, input_channel, 3, stride=1, padding=1)
+            nn.Conv2d(now_ch, input_channel, kernel_size, stride=1, padding=int((kernel_size-1)/2))
         )
         self.initialize()
 

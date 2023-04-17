@@ -17,6 +17,7 @@ img_size: [64, 64] #help='image size')
 
 # UNet
 input_channel: 3
+kernel_size: 5
 ch: 128  #help='base channel of UNet')
 ch_mult: [1, 2, 2, 2, 4, 8] #help='channel multiplier')
 attn: [3,4] #help='add attention to these levels')
