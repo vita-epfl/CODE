@@ -187,23 +187,43 @@ def get_dataset(args, cfg):
 
     elif dataset_name == "GTA":
         print("dataset_name :", dataset_name)
-        if cfg.trainer.random_flip:
-            train_transform =  transforms.Compose(
-                [
-                    transforms.Resize(lower_image_size),
-                    transforms.RandomHorizontalFlip(p=0.5),
-                    transforms.RandomCrop(image_size),
-                    transforms.ToTensor(),
-                ]
-            )
+        first_crop = args.first_crop
+        if first_crop is not None:
+            if cfg.trainer.random_flip:
+                train_transform =  transforms.Compose(
+                    [   transforms.RandomCrop(first_crop),
+                        transforms.Resize(lower_image_size),
+                        transforms.RandomHorizontalFlip(p=0.5),
+                        transforms.RandomCrop(image_size),
+                        transforms.ToTensor(),
+                    ]
+                )
+            else:
+                train_transform =  transforms.Compose(
+                    [   transforms.RandomCrop(first_crop),
+                        transforms.Resize(lower_image_size),
+                        transforms.RandomCrop(image_size),
+                        transforms.ToTensor(),
+                    ]
+                )
         else:
-            train_transform =  transforms.Compose(
-                [
-                    transforms.Resize(lower_image_size),
-                    transforms.RandomCrop(image_size),
-                    transforms.ToTensor(),
-                ]
-            )
+            if cfg.trainer.random_flip:
+                train_transform =  transforms.Compose(
+                    [
+                        transforms.Resize(lower_image_size),
+                        transforms.RandomHorizontalFlip(p=0.5),
+                        transforms.RandomCrop(image_size),
+                        transforms.ToTensor(),
+                    ]
+                )
+            else:
+                train_transform =  transforms.Compose(
+                    [
+                        transforms.Resize(lower_image_size),
+                        transforms.RandomCrop(image_size),
+                        transforms.ToTensor(),
+                    ]
+                ) 
         dataset = GTA_Pretraining_Dataset(cfg, transform = train_transform)
         test_dataset = None
 
