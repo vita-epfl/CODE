@@ -115,14 +115,14 @@ class AttnBlock(nn.Module):
 
 
 class ResBlock(nn.Module):
-    def __init__(self, in_ch, out_ch, tdim, dropout, attn=False, use_time_embedding=True):
+    def __init__(self, in_ch, out_ch, tdim, dropout, attn=False, use_time_embedding=True, kernel_size=3):
         super().__init__()
         self.use_time_embedding = use_time_embedding
 
         self.block1 = nn.Sequential(
             nn.GroupNorm(32, in_ch),
             Swish(),
-            nn.Conv2d(in_ch, out_ch, 3, stride=1, padding=1),
+            nn.Conv2d(in_ch, out_ch, kernel_size, stride=1, padding=1),
         )
         if self.use_time_embedding:
             self.temb_proj = nn.Sequential(
@@ -133,7 +133,7 @@ class ResBlock(nn.Module):
             nn.GroupNorm(32, out_ch),
             Swish(),
             nn.Dropout(dropout),
-            nn.Conv2d(out_ch, out_ch, 3, stride=1, padding=1),
+            nn.Conv2d(out_ch, out_ch, kernel_size, stride=1, padding=1),
         )
         if in_ch != out_ch:
             self.shortcut = nn.Conv2d(in_ch, out_ch, 1, stride=1, padding=0)
@@ -164,7 +164,7 @@ class ResBlock(nn.Module):
 
 
 class UNet(nn.Module):
-    def __init__(self, T, ch, ch_mult, attn, num_res_blocks, dropout, input_channel=3, use_time_embedding = True):
+    def __init__(self, T, ch, ch_mult, attn, num_res_blocks, dropout, input_channel=3, use_time_embedding = True, kernel_size=3):
         super().__init__()
         assert all([i < len(ch_mult) for i in attn]), 'attn index out of bound'
         tdim = ch * 4
@@ -180,7 +180,7 @@ class UNet(nn.Module):
             for _ in range(num_res_blocks):
                 self.downblocks.append(ResBlock(
                     in_ch=now_ch, out_ch=out_ch, tdim=tdim,
-                    dropout=dropout, attn=(i in attn)))
+                    dropout=dropout, attn=(i in attn),kernel_size=kernel_size))
                 now_ch = out_ch
                 chs.append(now_ch)
             if i != len(ch_mult) - 1:
@@ -188,8 +188,8 @@ class UNet(nn.Module):
                 chs.append(now_ch)
 
         self.middleblocks = nn.ModuleList([
-            ResBlock(now_ch, now_ch, tdim, dropout, attn=True),
-            ResBlock(now_ch, now_ch, tdim, dropout, attn=False),
+            ResBlock(now_ch, now_ch, tdim, dropout, attn=True, kernel_size=3),
+            ResBlock(now_ch, now_ch, tdim, dropout, attn=False,kernel_size=3),
         ])
 
         self.upblocks = nn.ModuleList()
@@ -198,7 +198,7 @@ class UNet(nn.Module):
             for _ in range(num_res_blocks + 1):
                 self.upblocks.append(ResBlock(
                     in_ch=chs.pop() + now_ch, out_ch=out_ch, tdim=tdim,
-                    dropout=dropout, attn=(i in attn)))
+                    dropout=dropout, attn=(i in attn),kernel_size=kernel_size))
                 now_ch = out_ch
             if i != 0:
                 self.upblocks.append(UpSample(now_ch))

@@ -107,7 +107,7 @@ class Cityscape_Trainer(BaseTrainer):
             self.half_precision = True
         else:
             self.half_precision = False
-
+        print("Using fp16 precision:", self.half_precision)
         LOG.info(f"CityscapeTrainer: {self.cfg.trainer.rank}, gpu: {self.cfg.trainer.gpu}")
         warnings.simplefilter(action='ignore', category=FutureWarning)
         os.makedirs(os.path.join(self.cfg.trainer.logdir, 'sample'), exist_ok=True)
@@ -154,9 +154,11 @@ class Cityscape_Trainer(BaseTrainer):
             self.dataset_test = self.dataset
         # model setup
         self.net_model = UNet(
-            T=self.cfg.trainer.T, ch=self.cfg.trainer.ch, ch_mult=OmegaConf.to_object(self.cfg.trainer.ch_mult), attn=
-            OmegaConf.to_object(self.cfg.trainer.attn),
-            num_res_blocks=self.cfg.trainer.num_res_blocks, dropout=self.cfg.trainer.dropout, input_channel=self.cfg.trainer.input_channel)
+            T=self.cfg.trainer.T, ch=self.cfg.trainer.ch, ch_mult=OmegaConf.to_object(self.cfg.trainer.ch_mult), 
+                attn=OmegaConf.to_object(self.cfg.trainer.attn),
+                num_res_blocks=self.cfg.trainer.num_res_blocks, dropout=self.cfg.trainer.dropout, 
+                input_channel=self.cfg.trainer.input_channel, kernel_size=self.cfg.trainer.kernel_size)
+
         self.ema_model = copy.deepcopy(self.net_model)
         self.optimizer = torch.optim.Adam(self.net_model.parameters(), lr=self.cfg.trainer.lr)
         self.sched = torch.optim.lr_scheduler.LambdaLR(self.optimizer, lr_lambda=self.warmup_lr)
@@ -211,10 +213,11 @@ class Cityscape_Trainer(BaseTrainer):
     def train(self,) -> None:
         self.net_model.train()
         self.optimizer.zero_grad()
+        previous_loss = 1.
         for step in range(self.cfg.trainer.total_steps):
             start_time = time.time()
             x_0, _ = next(self.datalooper)
-            previous_loss = 1.
+            
             loading_time = time.time() - start_time
 
             if self.x_T[0].shape != x_0[0].shape:
@@ -234,11 +237,13 @@ class Cityscape_Trainer(BaseTrainer):
                 diffusion_time = time.time() - start_time
                 loss.backward()
 
-            if previous_loss < 10*loss.data.cpu().item():
+            if (previous_loss < 80*loss.data.cpu().item()) and (step >0):
                 if self.writer is not None:
                     grid_ori_pb = make_grid(x_0) #(make_grid(x_0) + 1) / 2
                     img_grid_ori_pb = wandb.Image(grid_ori_pb.permute(1,2,0).cpu().numpy())
                     wandb.log({"Problem_Image": img_grid_ori_pb}) 
+
+            previous_loss = loss.data.cpu().item()
 
             if (step + 1) % self.cfg.trainer.accumulating_step == 0:
                 if self.half_precision:

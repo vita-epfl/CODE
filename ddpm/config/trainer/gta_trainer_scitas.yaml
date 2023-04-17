@@ -18,11 +18,13 @@ img_size: [256, 256] #help='image size')
 
 # UNet
 input_channel: 3
+kernel_size: 3
 ch: 128  #help='base channel of UNet')
-ch_mult: [1, 2, 2, 2, 4, 8] #help='channel multiplier')
-attn: [2,3] #help='add attention to these levels')
+ch_mult: [1, 1, 1, 1, 2, 2, 4, 8] #help='channel multiplier')
+attn: [2,3,4] #help='add attention to these levels')
 num_res_blocks: 3 #help='# resblock in each level')
 dropout: 0.1 #help='dropout rate of resblock')
+
 # Gaussian Diffusion
 beta_1: 1e-4 #help='start beta value')
 beta_T: 0.02 #help='end beta value')
@@ -30,7 +32,7 @@ T: 1000 #help='total diffusion steps')
 mean_type: epsilon #['xprev', 'xstart', 'epsilon'], help='predict variable')
 var_type: 'fixedlarge' #['fixedlarge', 'fixedsmall'], help='variance type')
 # Training
-lr: 1e-4 #help='target learning rate')
+lr: 1e-3 #help='target learning rate')
 grad_clip: 1. #help="gradient norm clipping")
 total_steps: 1000000 #help='total training steps')
 warmup: 5000 #help='learning rate warmup')
@@ -39,11 +41,11 @@ num_workers: 2 #help='workers of Dataloader')
 ema_decay: 0.9999 #help="ema decay rate")
 parallel: True #help='multi gpu training')
 unique_img: False #help='Train a model on a single image.')
-accumulating_step: 4
+accumulating_step: 10
 #Mixed Precision
 use_half_for_matmul: False
 use_half_for_conv: False
-use_half_precision: True
+use_half_precision: False
 
 # Logging & Sampling
 logdir: /work/vita/bastien/logs/GTA #help='log directory')
@@ -62,7 +64,7 @@ fid_cache: ./stats/cifar10.train.npz #help='FID cache')
 
 # Mode slurm
 slurm:
-  nodes: 2 # 2
+  nodes: 4 # 2
   gpus_per_node: 2  # max 2
   cpus_per_task: 10
   mem: 72 # in GiB 48
