@@ -264,8 +264,8 @@ class Cityscape_Trainer(BaseTrainer):
                 self.writer.add_scalar('loading_time', loading_time, step)
                 self.writer.add_scalar('loss', (loss*self.cfg.trainer.accumulating_step).data.cpu().item(), step)
 
-            if step % 100 == 0:
-                print("loss :",loss)
+                if step % 1000 == 0:
+                    print(f"Step_{step},  loss :",(loss*self.cfg.trainer.accumulating_step).data.cpu().item())
             # sample
             if self.cfg.trainer.sample_step > 0 and step % self.cfg.trainer.sample_step == 0:                
                 self.net_model.eval()
@@ -281,7 +281,7 @@ class Cityscape_Trainer(BaseTrainer):
                                 x_0 = self.ema_sampler(self.x_T)
                         else:
                             x_0 = self.ema_sampler(self.x_T)
-                        grid = (make_grid(x_0) + 1) / 2
+                        grid = make_grid(x_0)
                         path = os.path.join(
                             self.cfg.trainer.logdir, 'sample', '%d.png' % step)
                         if self.writer is not None:

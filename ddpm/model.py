@@ -171,13 +171,13 @@ class UNet(nn.Module):
         self.use_time_embedding = use_time_embedding
         if self.use_time_embedding:
             self.time_embedding = TimeEmbedding(T, ch, tdim)
-        self.head = nn.Conv2d(input_channel, ch, kernel_size=3, stride=1, padding=1)
+        self.head = nn.Conv2d(input_channel, ch, kernel_size=3, stride=1, padding= int(kernel_size-1/2))
         self.downblocks = nn.ModuleList()
         chs = [ch]  # record output channel when dowmsample for upsample
         now_ch = ch
         for i, mult in enumerate(ch_mult):
             out_ch = ch * mult
-            for _ in range(num_res_blocks):
+            for _ in range(num_res_blocks)
                 self.downblocks.append(ResBlock(
                     in_ch=now_ch, out_ch=out_ch, tdim=tdim,
                     dropout=dropout, attn=(i in attn),kernel_size=kernel_size))

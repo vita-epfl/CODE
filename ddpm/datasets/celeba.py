@@ -180,7 +180,7 @@ class CelebA(VisionDataset):
         if self.target_transform is not None:
             target = self.target_transform(target)
 
-        return X, target, X_original
+        return X, X_original
 
     def __len__(self):
         return len(self.attr)
