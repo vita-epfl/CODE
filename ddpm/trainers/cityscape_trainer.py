@@ -9,6 +9,7 @@ import copy
 import warnings 
 import time
 import matplotlib.pyplot as plt
+import gc
 
 import torch
 import torch.cuda.amp as amp
@@ -127,17 +128,6 @@ class Cityscape_Trainer(BaseTrainer):
         if self.cfg.trainer.gpu is not None:
             torch.cuda.set_device(self.cfg.trainer.gpu)
 
-        # model setup
-        self.net_model = UNet(
-            T=self.cfg.trainer.T, ch=self.cfg.trainer.ch, ch_mult=OmegaConf.to_object(self.cfg.trainer.ch_mult), 
-                attn=OmegaConf.to_object(self.cfg.trainer.attn),
-                num_res_blocks=self.cfg.trainer.num_res_blocks, dropout=self.cfg.trainer.dropout, 
-                input_channel=self.cfg.trainer.input_channel, kernel_size=self.cfg.trainer.kernel_size)
-
-        self.ema_model = copy.deepcopy(self.net_model)
-        self.optimizer = torch.optim.Adam(self.net_model.parameters(), lr=self.cfg.trainer.lr)
-        self.sched = torch.optim.lr_scheduler.LambdaLR(self.optimizer, lr_lambda=self.warmup_lr)
-
         if self.cfg.trainer.checkpointpath is not None:
             try:            
                 ckpt = torch.load(self.cfg.trainer.checkpointpath)
@@ -155,6 +145,7 @@ class Cityscape_Trainer(BaseTrainer):
                     self.cfg.trainer.first_crop = ckpt_config.trainer.first_crop
                     self.cfg.trainer.lower_image_size = ckpt_config.trainer.lower_image_size
                     self.cfg.trainer.img_size = ckpt_config.trainer.img_size
+
                 self.net_model = UNet(
                     T=self.cfg.trainer.T, ch=self.cfg.trainer.ch, ch_mult=OmegaConf.to_object(self.cfg.trainer.ch_mult), 
                     attn=OmegaConf.to_object(self.cfg.trainer.attn),
@@ -165,14 +156,40 @@ class Cityscape_Trainer(BaseTrainer):
                 self.sched = torch.optim.lr_scheduler.LambdaLR(self.optimizer, lr_lambda=self.warmup_lr)
                 self.net_model.load_state_dict(ckpt['net_model'])
                 self.ema_model.load_state_dict(ckpt['ema_model'])
+
                 print("Checkpoint Loaded")
+                del ckpt
+                del ckpt_config
+                torch.cuda.empty_cache()
+                gc.collect()
             except Exception as e:
+                        # model setup
+                self.net_model = UNet(
+                    T=self.cfg.trainer.T, ch=self.cfg.trainer.ch, ch_mult=OmegaConf.to_object(self.cfg.trainer.ch_mult), 
+                        attn=OmegaConf.to_object(self.cfg.trainer.attn),
+                        num_res_blocks=self.cfg.trainer.num_res_blocks, dropout=self.cfg.trainer.dropout, 
+                        input_channel=self.cfg.trainer.input_channel, kernel_size=self.cfg.trainer.kernel_size)
+
+                self.ema_model = copy.deepcopy(self.net_model)
+                self.optimizer = torch.optim.Adam(self.net_model.parameters(), lr=self.cfg.trainer.lr)
+                self.sched = torch.optim.lr_scheduler.LambdaLR(self.optimizer, lr_lambda=self.warmup_lr)
                 LOG.info(f"Error while trying to load the checkpoint.")
                 print(e)
+        else:
+                    # model setup
+            self.net_model = UNet(
+                T=self.cfg.trainer.T, ch=self.cfg.trainer.ch, ch_mult=OmegaConf.to_object(self.cfg.trainer.ch_mult), 
+                    attn=OmegaConf.to_object(self.cfg.trainer.attn),
+                    num_res_blocks=self.cfg.trainer.num_res_blocks, dropout=self.cfg.trainer.dropout, 
+                    input_channel=self.cfg.trainer.input_channel, kernel_size=self.cfg.trainer.kernel_size)
+
+            self.ema_model = copy.deepcopy(self.net_model)
+            self.optimizer = torch.optim.Adam(self.net_model.parameters(), lr=self.cfg.trainer.lr)
+            self.sched = torch.optim.lr_scheduler.LambdaLR(self.optimizer, lr_lambda=self.warmup_lr)
 
         self.dataset, self.dataset_test = get_dataset(None, self.cfg)
         print("train dataset length",len(self.dataset))
-        
+        dist.barrier()
 
         self.train_dataloader = create_dataloader(
                 self.dataset,
@@ -195,6 +212,7 @@ class Cityscape_Trainer(BaseTrainer):
         else:
             self.test_dataloader = self.train_dataloader
             self.dataset_test = self.dataset
+        print(f"GPU : {self.cfg.trainer.gpu}")
         self.diffusion_trainer = GaussianDiffusionTrainer(
             self.net_model, self.cfg.trainer.beta_1, self.cfg.trainer.beta_T, self.cfg.trainer.T).cuda(self.cfg.trainer.gpu)
         # trainer = HeatDiffusionTrainer(

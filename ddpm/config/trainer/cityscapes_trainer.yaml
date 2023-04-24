@@ -31,7 +31,7 @@ T: 1000 #help='total diffusion steps')
 mean_type: epsilon #['xprev', 'xstart', 'epsilon'], help='predict variable')
 var_type: 'fixedlarge' #['fixedlarge', 'fixedsmall'], help='variance type')
 # Training
-lr: 2e-4 #help='target learning rate')
+lr: 3e-5 #help='target learning rate')
 grad_clip: 1. #help="gradient norm clipping")
 total_steps: 1000000 #help='total training steps')
 warmup: 5000 #help='learning rate warmup')
