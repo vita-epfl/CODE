@@ -22,9 +22,9 @@ img_size: [512, 512] #help='image size')
 # UNet
 input_channel: 3
 kernel_size: 3
-ch: 128  #help='base channel of UNet')
-ch_mult: [1, 1, 1, 2, 2, 2, 4, 8] #help='channel multiplier')
-attn: [5,6,7] #help='add attention to these levels')
+ch: 64  #help='base channel of UNet')
+ch_mult: [1, 1, 2, 2, 2, 4, 8] #help='channel multiplier')
+attn: [4,5, 6] #help='add attention to these levels')
 num_res_blocks: 3 #help='# resblock in each level')
 dropout: 0.1 #help='dropout rate of resblock')
 # Gaussian Diffusion
@@ -38,7 +38,7 @@ lr: 1e-5 #help='target learning rate')
 grad_clip: 2. #help="gradient norm clipping")
 total_steps: 1000000 #help='total training steps')
 warmup: 5000 #help='learning rate warmup')
-batch_size: 4 #help='batch size')
+batch_size: 1 #help='batch size')
 num_workers: 2 #help='workers of Dataloader')
 ema_decay: 0.9999 #help="ema decay rate")
 parallel: True #help='multi gpu training')
@@ -52,10 +52,10 @@ use_half_precision: False
 # Logging & Sampling
 logdir: /work/vita/bastien/logs/Cityscapes #help='log directory')
 wandb_entity: bastienvd #help='wandb id to use')
-sample_size: 8 #"sampling size of images")
+sample_size: 1 #"sampling size of images")
 sample_step: 10000 #help='frequency of sampling')
-ml_exp_name: Cityscape_Diffusion_512 #help = 'name of the experience on wandb')
-checkpointpath: /work/vita/bastien/logs/Cityscapes/Cityscape_Diffusion_128x_2023-04-18_10-55/ckpt_400000.pt #/mnt/scitas/bastien/logs/Audio/ckpt_350000.pt
+ml_exp_name: Cityscape_Diffusion_512x #help = 'name of the experience on wandb')
+checkpointpath: #/mnt/scitas/bastien/logs/Audio/ckpt_350000.pt
 
 # Evaluation
 save_step: 50000 #help='frequency of saving checkpoints, 0 to disable during training')

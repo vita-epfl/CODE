@@ -17,16 +17,16 @@ random_flip: False #help='Whether to use random flip in training')
 #original_img_size [1052,1914]
 original_img_size: [1052,1914]
 first_crop: [1024,1904]
-lower_image_size: [64, 119] #[270,430]
-img_size: [64, 64] #help='image size')
+lower_image_size: [128, 238] #[270,430]
+img_size: [128, 128] #help='image size')
 
 # UNet
 input_channel: 3
 kernel_size: 3
 ch: 128  #help='base channel of UNet')
-ch_mult: [1, 2, 2, 4, 8] #help='channel multiplier')
-attn: [2,3,4] #help='add attention to these levels')
-num_res_blocks: 3 #help='# resblock in each level')
+ch_mult: [1, 2, 2, 2, 4, 8] #help='channel multiplier')
+attn: [3,4,5] #help='add attention to these levels')
+num_res_blocks: 4 #help='# resblock in each level')
 dropout: 0.1 #help='dropout rate of resblock')
 
 # Gaussian Diffusion
@@ -36,16 +36,16 @@ T: 1000 #help='total diffusion steps')
 mean_type: epsilon #['xprev', 'xstart', 'epsilon'], help='predict variable')
 var_type: 'fixedlarge' #['fixedlarge', 'fixedsmall'], help='variance type')
 # Training
-lr: 1e-3 #help='target learning rate')
+lr: 3e-5 #help='target learning rate')
 grad_clip: 1. #help="gradient norm clipping")
 total_steps: 1000000 #help='total training steps')
 warmup: 5000 #help='learning rate warmup')
-batch_size: 16 #help='batch size')
-num_workers: 2 #help='workers of Dataloader')
+batch_size: 2 #help='batch size')
+num_workers: 4 #help='workers of Dataloader')
 ema_decay: 0.9999 #help="ema decay rate")
 parallel: True #help='multi gpu training')
 unique_img: False #help='Train a model on a single image.')
-accumulating_step: 5
+accumulating_step: 16
 #Mixed Precision
 use_half_for_matmul: False
 use_half_for_conv: False
@@ -54,9 +54,9 @@ use_half_precision: False
 # Logging & Sampling
 logdir: /mnt/scitas/bastien/logs/GTA #help='log directory')
 wandb_entity: bastienvd #help='wandb id to use')
-sample_size: 8 #"sampling size of images")
+sample_size: 6 #"sampling size of images")
 sample_step: 10000 #help='frequency of sampling')
-ml_exp_name: GTA_Diffusion_x64 #help = 'name of the experience on wandb')
+ml_exp_name: GTA_Diffusion_x128 #help = 'name of the experience on wandb')
 checkpointpath: #/mnt/scitas/bastien/logs/Audio/ckpt_350000.pt
 
 # Evaluation

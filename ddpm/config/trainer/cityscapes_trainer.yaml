@@ -18,7 +18,7 @@ img_size: [256, 256] #help='image size')
 
 # UNet
 input_channel: 3
-kernel_size: 5
+kernel_size: 3
 ch: 128  #help='base channel of UNet')
 ch_mult: [1, 2, 2, 2, 4, 8] #help='channel multiplier')
 attn: [2,3,4] #help='add attention to these levels')
@@ -52,8 +52,8 @@ logdir: /mnt/scitas/bastien/logs/Cityscapes #help='log directory')
 wandb_entity: bastienvd #help='wandb id to use')
 sample_size: 8 #"sampling size of images")
 sample_step: 10000 #help='frequency of sampling')
-ml_exp_name: Cityscape_Diffusion_128x #help = 'name of the experience on wandb')
-checkpointpath: #/mnt/scitas/bastien/logs/Audio/ckpt_350000.pt
+ml_exp_name: Cityscape_Diffusion_128x_follow #help = 'name of the experience on wandb')
+checkpointpath: /mnt/scitas/bastien/logs/Cityscapes/Cityscape_Diffusion_128x_2023-04-18_10-55/ckpt_400000.pt #/mnt/scitas/bastien/logs/Audio/ckpt_350000.pt
 
 # Evaluation
 save_step: 50000 #help='frequency of saving checkpoints, 0 to disable during training')
