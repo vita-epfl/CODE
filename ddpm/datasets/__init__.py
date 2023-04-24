@@ -10,6 +10,7 @@ from ddpm.datasets.ffhq import FFHQ
 from ddpm.datasets.lsun import LSUN
 from ddpm.datasets.audio import AudioDataset
 from ddpm.datasets.gta5 import GTA_Pretraining_Dataset
+from ddpm.datasets.imagenet import Imagenet_Dataset
 from torch.utils.data import Subset
 import numpy as np
 
@@ -144,7 +145,7 @@ def get_dataset(args, cfg):
             val_dataset = Cityscapes(root=cfg.dataset.root_dir, split='val', mode=cfg.dataset.mode,
                      target_type='semantic', transforms=transforms.Compose([transforms.ToTensor(),]),)
             
-            dataset = torch.utils.data.ConcatDataset([train_dataset, val_dataset])
+            dataset = torch.utils.data.ConcatDataset([dataset, val_dataset])
 
             test_dataset = Cityscapes(root=cfg.dataset.root_dir, split='test', mode=cfg.dataset.mode,
                      target_type='semantic', transforms=transforms.Compose([transforms.ToTensor(),]),)
@@ -231,7 +232,50 @@ def get_dataset(args, cfg):
                 ) 
         dataset = GTA_Pretraining_Dataset(cfg, transform = train_transform)
         test_dataset = None
-
+    
+    elif dataset_name == "IMAGENET":
+        print("dataset_name :", dataset_name)
+        first_crop = args.first_crop
+        if first_crop is not None:
+            if cfg.trainer.random_flip:
+                train_transform =  transforms.Compose(
+                    [   transforms.Resize(original_img_size),
+                        transforms.RandomCrop(first_crop),
+                        transforms.Resize(lower_image_size),
+                        transforms.RandomHorizontalFlip(p=0.5),
+                        transforms.RandomCrop(image_size),
+                        transforms.ToTensor(),
+                    ]
+                )
+            else:
+                train_transform =  transforms.Compose(
+                    [   transforms.Resize(original_img_size),
+                        transforms.RandomCrop(first_crop),
+                        transforms.Resize(lower_image_size),
+                        transforms.RandomCrop(image_size),
+                        transforms.ToTensor(),
+                    ]
+                )
+        else:
+            if cfg.trainer.random_flip:
+                train_transform =  transforms.Compose(
+                    [   transforms.Resize(original_img_size),
+                        transforms.Resize(lower_image_size),
+                        transforms.RandomHorizontalFlip(p=0.5),
+                        transforms.RandomCrop(image_size),
+                        transforms.ToTensor(),
+                    ]
+                )
+            else:
+                train_transform =  transforms.Compose(
+                    [   transforms.Resize(original_img_size),
+                        transforms.Resize(lower_image_size),
+                        transforms.RandomCrop(image_size),
+                        transforms.ToTensor(),
+                    ]
+                ) 
+        dataset = Imagenet_Dataset(cfg, transform = train_transform)
+        test_dataset = None
     elif dataset_name == "LSUN":
         train_folder = "{}_train".format(config.data.category)
         val_folder = "{}_val".format(config.data.category)
