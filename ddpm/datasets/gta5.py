@@ -26,7 +26,10 @@ class GTA_Pretraining_Dataset(VisionDataset):
         
         self.cfg = cfg
         self.lower_image_size = OmegaConf.to_object(self.cfg.trainer.lower_image_size)
-        self.img_size = OmegaConf.to_object(self.cfg.trainer.img_size)
+        try:
+            self.img_size = OmegaConf.to_object(self.cfg.trainer.img_size)
+        except:
+            self.img_size = self.cfg.trainer.img_size
         self.image_folder = image_folder
         self.labels_folder = image_folder
 

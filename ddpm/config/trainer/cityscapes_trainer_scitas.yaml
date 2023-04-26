@@ -55,7 +55,7 @@ wandb_entity: bastienvd #help='wandb id to use')
 sample_size: 1 #"sampling size of images")
 sample_step: 10000 #help='frequency of sampling')
 ml_exp_name: Cityscape_Diffusion_512x #help = 'name of the experience on wandb')
-checkpointpath: #/mnt/scitas/bastien/logs/Audio/ckpt_350000.pt
+checkpointpath: /work/vita/bastien/logs/Cityscapes/Cityscape_Diffusion_128x_2023-04-18_10-55/ckpt_400000.pt #/mnt/scitas/bastien/logs/Audio/ckpt_350000.pt
 
 # Evaluation
 save_step: 50000 #help='frequency of saving checkpoints, 0 to disable during training')
