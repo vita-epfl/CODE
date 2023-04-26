@@ -7,6 +7,7 @@ from torch.distributed.elastic.multiprocessing.errors import record
 from ddpm.trainers.audio_trainer import AudioTrainer 
 from ddpm.trainers.cityscape_trainer import Cityscape_Trainer
 from ddpm.utils.utils import get_output_dir
+from ddpm.trainers.ddib_based_trainer import DDIB_Trainer
 
 LOG = logging.getLogger(__name__)
 
@@ -16,6 +17,8 @@ LOG = logging.getLogger(__name__)
 def main(cfg: DictConfig) -> int:
     if cfg.trainer.type == "audio" :
         trainer = AudioTrainer(cfg)
+    elif cfg.trainer.type == 'ddib':
+        trainer = DDIB_Trainer(cfg)
     elif cfg.trainer.type == "cityscape" :
         trainer = Cityscape_Trainer(cfg)
     else:
