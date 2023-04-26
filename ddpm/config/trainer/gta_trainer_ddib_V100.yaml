@@ -29,6 +29,10 @@ attention_resolutions: "32,16,8"
 # attn: [3,4,5] #help='add attention to these levels')
 num_res_blocks: 2 #help='# resblock in each level')
 dropout: 0.01 #help='dropout rate of resblock')
+num_heads: 4
+num_head_channels: -1
+resblock_updown: True
+use_scale_shift_norm: True
 
 # Gaussian Diffusion
 beta_schedule: "cosine"
