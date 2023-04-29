@@ -31,16 +31,16 @@ T: 1000 #help='total diffusion steps')
 mean_type: epsilon #['xprev', 'xstart', 'epsilon'], help='predict variable')
 var_type: 'fixedlarge' #['fixedlarge', 'fixedsmall'], help='variance type')
 # Training
-lr: 1e-4 #help='target learning rate')
+lr: 3e-5 #help='target learning rate')
 grad_clip: 1. #help="gradient norm clipping")
 total_steps: 1000000 #help='total training steps')
 warmup: 5000 #help='learning rate warmup')
 batch_size: 2 #help='batch size')
-num_workers: 32 #help='workers of Dataloader')
+num_workers: 16 #help='workers of Dataloader')
 ema_decay: 0.9999 #help="ema decay rate")
 parallel: True #help='multi gpu training')
 unique_img: False #help='Train a model on a single image.')
-accumulating_step: 16
+accumulating_step: 8
 
 #Mixed Precision
 use_half_for_matmul: False
@@ -53,7 +53,7 @@ wandb_entity: bastienvd #help='wandb id to use')
 sample_size: 8 #"sampling size of images")
 sample_step: 10000 #help='frequency of sampling')
 ml_exp_name: Cityscape_Diffusion_128x_follow #help = 'name of the experience on wandb')
-checkpointpath: /mnt/scitas/bastien/logs/Cityscapes/Cityscape_Diffusion_128x_2023-04-18_10-55/ckpt_400000.pt #/mnt/scitas/bastien/logs/Audio/ckpt_350000.pt
+checkpointpath: /work/vita/bastien/logs/Cityscapes/Cityscape_Diffusion_128x_2023-04-18_10-55/ckpt_400000.pt #/mnt/scitas/bastien/logs/Audio/ckpt_350000.pt
 
 # Evaluation
 save_step: 50000 #help='frequency of saving checkpoints, 0 to disable during training')

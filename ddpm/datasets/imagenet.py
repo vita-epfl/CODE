@@ -18,8 +18,8 @@ import torchvision.transforms as transforms
 class Imagenet_Dataset(VisionDataset):
     def __init__(self, cfg, root: Optional[str] = None, 
                             split: Optional[str] = None, 
-                            corruption: Optional[str] = None, 
-                            corruption_severity: Optional[int] = None,
+                            corruption: Optional[List[str]] = None, 
+                            corruption_severity: Optional[List[int]] = 1,
                             transform: Optional[Callable] = None,
                             inv_transform: Optional[Callable] = None):
         self.cfg = cfg
@@ -41,12 +41,12 @@ class Imagenet_Dataset(VisionDataset):
         if corruption is not None:
             self.corruption = corruption
         else:
-            self.corruption = cfg.trainer.corruption
+            self.corruption = OmegaConf.to_object(cfg.trainer.corruption)
 
         if corruption_severity is not None:
             self.corruption_severity = corruption_severity
         else:
-            self.corruption_severity = cfg.trainer.corruption_severity
+            self.corruption_severity = OmegaConf.to_object(cfg.trainer.corruption_severity)
 
         if transform is not None:
             self.transform = transform
@@ -54,23 +54,37 @@ class Imagenet_Dataset(VisionDataset):
             self.transform = None
             
         self.images = []
+        self.original_images = []
         valid_splits = ("train",  "val", "all")
         assert self.split in valid_splits
-
-        if self.split == "all":
-            for split in ["train", "val"]:
+        if self.corruption is None:
+            if self.split == "all":
+                for split in ["train", "val"]:
+                    self.images_dir = os.path.join(self.root, split)
+                    for subdir in os.listdir(self.images_dir):
+                        img_subdir = os.path.join(self.images_dir, subdir)
+                        for file_name in os.listdir(img_subdir):
+                            self.images.append(os.path.join(img_subdir, file_name))
+                            
+            else:
                 self.images_dir = os.path.join(self.root, split)
                 for subdir in os.listdir(self.images_dir):
                     img_subdir = os.path.join(self.images_dir, subdir)
                     for file_name in os.listdir(img_subdir):
                         self.images.append(os.path.join(img_subdir, file_name))
-                        
         else:
-            self.images_dir = os.path.join(self.root, split)
-            for subdir in os.listdir(self.images_dir):
-                img_subdir = os.path.join(self.images_dir, subdir)
-                for file_name in os.listdir(img_subdir):
-                    self.images.append(os.path.join(img_subdir, file_name))
+            self.original_image_dir = os.path.join(self.root,'val')
+            self.image_c_dir = os.path.join(self.root, "imagenet-c")
+            for corruption in self.corruption:
+                corrupted_image_dir = os.path.join(self.image_c_dir, self.corruption)
+                for severity in self.corruption_severity:
+                    severity_subdir = os.path.join(corrupted_image_dir, severity)
+                    for img_subdir in os.listdir(severity_subdir): 
+                        img_subdir_path = os.path.join(severity_subdir, img_subdir)
+                        original_subdir_path = os.path.join(self.original_image_dir, img_subdir)
+                        for file_name in os.listdir(img_subdir_path):
+                            self.images.append(os.path.join(img_subdir, file_name))
+                            self.original_images.append(os.path.join(original_subdir_path, file_name))
 
 
     def __getitem__(self, index: int) -> Any:
@@ -83,27 +97,7 @@ class Imagenet_Dataset(VisionDataset):
         """
 
         X = Image.open(self.images[index]).convert("RGB")
-        X_original = X
-
-        if self.corruption is not None:         
-            if self.corruption == 'gaussian_blur':
-                X = PIL.Image.fromarray(gaussian_blur(X, severity  = self.corruption_severity).astype(np.uint8))
-            elif self.corruption == "glass_blur":
-                X = PIL.Image.fromarray(glass_blur(X, severity  = self.corruption_severity).astype(np.uint8))
-            elif self.corruption == "defocus_blur":
-                X = PIL.Image.fromarray(defocus_blur(X, severity  = self.corruption_severity).astype(np.uint8))
-            elif self.corruption == "fog":
-                X = PIL.Image.fromarray(fog(X, severity  = self.corruption_severity).astype(np.uint8))
-            elif self.corruption == "brightness":
-                X = PIL.Image.fromarray(brightness(X, severity  = self.corruption_severity).astype(np.uint8))
-            elif self.corruption == "contrast":
-                X = PIL.Image.fromarray(contrast(X, severity  = self.corruption_severity).astype(np.uint8))
-            elif self.corruption == "spatter":
-                X = PIL.Image.fromarray(spatter(X, severity  = self.corruption_severity).astype(np.uint8))
-            elif self.corruption == "elastic_transform":
-                X = PIL.Image.fromarray(elastic_transform(X, severity  = self.corruption_severity).astype(np.uint8))
-            elif self.corruption == "snow":
-                X = PIL.Image.fromarray(snow(X, severity  = self.corruption_severity).astype(np.uint8))
+        X_original = Image.open(self.original_images[index]).convert("RGB")
 
         if self.transform is not None:
             image = self.transform(X)

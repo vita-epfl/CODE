@@ -236,44 +236,39 @@ def get_dataset(args, cfg):
     elif dataset_name == "IMAGENET":
         print("dataset_name :", dataset_name)
         first_crop = args.first_crop
-        if first_crop is not None:
+        if cfg.trainer.center_crop:
             if cfg.trainer.random_flip:
                 train_transform =  transforms.Compose(
                     [   transforms.Resize(original_img_size),
-                        transforms.RandomCrop(first_crop),
-                        transforms.Resize(lower_image_size),
+                        transforms.CenterCrop(image_size),
                         transforms.RandomHorizontalFlip(p=0.5),
-                        transforms.RandomCrop(image_size),
                         transforms.ToTensor(),
                     ]
                 )
             else:
                 train_transform =  transforms.Compose(
                     [   transforms.Resize(original_img_size),
-                        transforms.RandomCrop(first_crop),
-                        transforms.Resize(lower_image_size),
-                        transforms.RandomCrop(image_size),
+                        transforms.CenterCrop(image_size),
                         transforms.ToTensor(),
                     ]
                 )
-        else:
+        else:  
             if cfg.trainer.random_flip:
                 train_transform =  transforms.Compose(
                     [   transforms.Resize(original_img_size),
-                        transforms.Resize(lower_image_size),
-                        transforms.RandomHorizontalFlip(p=0.5),
                         transforms.RandomCrop(image_size),
+                        transforms.RandomHorizontalFlip(p=0.5),
                         transforms.ToTensor(),
                     ]
                 )
             else:
                 train_transform =  transforms.Compose(
                     [   transforms.Resize(original_img_size),
-                        transforms.Resize(lower_image_size),
                         transforms.RandomCrop(image_size),
                         transforms.ToTensor(),
                     ]
-                ) 
+                )
+
         dataset = Imagenet_Dataset(cfg, transform = train_transform)
         test_dataset = None
     elif dataset_name == "LSUN":

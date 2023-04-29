@@ -35,7 +35,7 @@ from torchvision import transforms
 from tqdm import trange
 from ddpm.datasets import get_dataset
 from ddpm.trainers.base_trainer import BaseTrainer
-from ddpm.ddib_diffusion import GaussianDiffusion, ModelMeanType, ModelVarType, LossType, get_named_beta_schedule
+from ddpm.ddib_diffusion import GaussianDiffusion, SpacedDiffusion, ModelMeanType, ModelVarType, LossType, get_named_beta_schedule, space_timesteps
 from ddpm.ddib_model import UNetModel
 from ddpm.ddib_utils import *
 from ddpm.ddib_samplers import LossAwareSampler, UniformSampler, create_named_schedule_sampler
@@ -212,13 +212,10 @@ class DDIB_Trainer(BaseTrainer):
 
         self.microbatch = self.cfg.trainer.microbatch if (self.cfg.trainer.microbatch is not None and self.cfg.trainer.microbatch > 0)  else self.cfg.trainer.batch_size
 
-        self.betas = get_named_beta_schedule(self.cfg.trainer.beta_schedule, self.cfg.trainer.num_timesteps)
-
-        self.diffusion = GaussianDiffusion(betas = self.betas,
-                                           model_mean_type = self.model_mean_type,
-                                           model_var_type = self.model_var_type,
-                                           loss_type = self.loss_type,
-                                           rescale_timesteps = False)
+        if self.cfg.trainer.load_imagenet_256_ckpt:
+            self.create_diffusion_imagenet_256()
+        else:
+            self.create_diffusion()
 
         self.schedule_sampler = create_named_schedule_sampler(self.cfg.trainer.schedule_sampler, self.diffusion)
 
@@ -346,7 +343,52 @@ class DDIB_Trainer(BaseTrainer):
                     "config": OmegaConf.to_container(self.cfg)
                 }
                 torch.save(ckpt, os.path.join(self.cfg.trainer.logdir, f'ckpt_{step}.pt'))
-            
+
+
+    def create_diffusion(self,):
+        self.betas = get_named_beta_schedule(self.cfg.trainer.beta_schedule, self.cfg.trainer.num_timesteps)
+        self.diffusion = GaussianDiffusion(betas = self.betas,
+                                           model_mean_type = self.model_mean_type,
+                                           model_var_type = self.model_var_type,
+                                           loss_type = self.loss_type,
+                                           rescale_timesteps = False)
+        if self.cfg.trainer.timesteps_respacing is not None:
+            timesteps_respacing = self.cfg.trainer.timesteps_respacing
+        else:
+            timesteps_respacing = "ddim25"
+
+        self.spaced_diffusion = SpacedDiffusion(use_timesteps=space_timesteps(self.cfg.trainer.T, timesteps_respacing),
+                                betas=self.betas,
+                                model_mean_type=self.model_mean_type,
+                                model_var_type=self.model_var_type,
+                                loss_type=self.loss_type,
+                                rescale_timesteps=False,
+                            )
+
+
+    def create_diffusion_imagenet_256(self):
+        noise_schedule = 'linear' 
+        diffusion_steps = 1000
+        self.betas = get_named_beta_schedule(noise_schedule, diffusion_steps)
+        self.diffusion = GaussianDiffusion(betas = self.betas,
+                                    model_mean_type = self.model_mean_type,
+                                    model_var_type = self.model_var_type,
+                                    loss_type = self.loss_type,
+                                    rescale_timesteps = False)
+
+        if self.cfg.trainer.timesteps_respacing is not None:
+            timesteps_respacing = self.cfg.trainer.timesteps_respacing
+        else:
+            timesteps_respacing = "ddim25"
+
+        self.spaced_diffusion = SpacedDiffusion(use_timesteps=space_timesteps(diffusion_steps, timesteps_respacing),
+                                betas=self.betas,
+                                model_mean_type=ModelMeanType.EPSILON,
+                                model_var_type=ModelVarType.LEARNED_RANGE,
+                                loss_type=LossType.MSE,
+                                rescale_timesteps=False,
+                            )
+
 
     def create_model(self,):
         if self.cfg.trainer.checkpointpath is not None:
@@ -402,7 +444,10 @@ class DDIB_Trainer(BaseTrainer):
         else:
             out_channels = (3 if not self.learn_sigma else 6)
 
-        self.net_model = UNetModel(self.image_size,
+        if self.cfg.trainer.load_imagenet_256_ckpt:
+            self.load_imagenet_256()
+        else:
+            self.net_model = UNetModel(self.image_size,
                         in_channels = self.cfg.trainer.input_channel,
                         model_channels = self.cfg.trainer.ch, #128
                         out_channels = out_channels,
@@ -424,12 +469,67 @@ class DDIB_Trainer(BaseTrainer):
 
         self.ema_model = copy.deepcopy(self.net_model)
 
-        self.dataset, self.dataset_test = get_dataset(None, self.cfg)
         if self.net_model_state_dict is not None:
             self.net_model.load_state_dict(self.net_model_state_dict)
         if self.ema_model_state_dict is not None:
             self.ema_model.load_state_dict(self.ema_model_state_dict)
         
+        self.net_model = self.net_model.cuda(self.cfg.trainer.gpu)
+        self.ema_model = self.ema_model.cuda(self.cfg.trainer.gpu)
+        self.net_model = DistributedDataParallel(self.net_model, device_ids=[self.cfg.trainer.gpu])
+        self.ema_model = DistributedDataParallel(self.ema_model, device_ids=[self.cfg.trainer.gpu])
+
+        # show model size
+        model_size = 0
+        for param in self.net_model.parameters():
+            model_size += param.data.nelement()
+        LOG.info('Model params: %.2f M' % (model_size / 1024 / 1024))
+
+
+    def load_imagenet_256(self,):
+        attention_resolutions = [32,16,8]
+        class_cond = False 
+        diffusion_steps = 1000 
+        image_size = 256 
+        learn_sigma = True 
+        noise_schedule = 'linear' 
+        num_channels = 256 
+        num_head_channels = 64 
+        num_res_blocks = 2 
+        resblock_updown = True 
+        use_fp16 = True 
+        use_scale_shift_norm = True
+        input_channels = 3
+        if self.cfg.trainer.input_channel == 1:
+            out_channels = 1
+        else:
+            out_channels = (3 if not learn_sigma else 6)
+        self.net_model = UNetModel(image_size,
+                        in_channels = input_channels,
+                        model_channels = num_channels, #128
+                        out_channels = out_channels,
+                        num_res_blocks = num_res_blocks, #2
+                        attention_resolutions = attention_resolutions,
+                        dropout=0.,
+                        channel_mult=(1, 1, 2, 2, 4, 4),
+                        conv_resample=True,
+                        dims=2,
+                        num_classes=None,
+                        use_checkpoint=False,
+                        use_fp16=use_fp16,
+                        num_heads=-1,
+                        num_head_channels=num_head_channels,
+                        num_heads_upsample=-1,
+                        use_scale_shift_norm=use_scale_shift_norm,
+                        resblock_updown=resblock_updown,
+                        use_new_attention_order=False)
+
+        ckpt_imagenet = torch.load(self.cfg.trainer.imagenet_256_ckpt)
+        self.net_model.load_state_dict(ckpt_imagenet)
+        self.ema_model = copy.deepcopy(self.net_model) 
+        if use_fp16:
+            self.net_model.convert_to_fp16()
+            self.ema_model.convert_to_fp16()
         self.net_model = self.net_model.cuda(self.cfg.trainer.gpu)
         self.ema_model = self.ema_model.cuda(self.cfg.trainer.gpu)
         self.net_model = DistributedDataParallel(self.net_model, device_ids=[self.cfg.trainer.gpu])
