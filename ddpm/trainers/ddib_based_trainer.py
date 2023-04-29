@@ -415,11 +415,11 @@ class DDIB_Trainer(BaseTrainer):
                         num_classes=None,
                         use_checkpoint=False,
                         use_fp16=self.cfg.trainer.use_fp16,
-                        num_heads=4,
-                        num_head_channels=-1,
+                        num_heads=self.cfg.trainer.num_heads,
+                        num_head_channels=self.cfg.trainer.num_head_channels,
                         num_heads_upsample=-1,
-                        use_scale_shift_norm=False,
-                        resblock_updown=False,
+                        use_scale_shift_norm=self.cfg.trainer.use_scale_shift_norm,
+                        resblock_updown=self.cfg.trainer.resblock_updown,
                         use_new_attention_order=False)
 
         self.ema_model = copy.deepcopy(self.net_model)

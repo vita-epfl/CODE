@@ -21,7 +21,10 @@ class Cityscapes_Pretraining_Dataset(VisionDataset):
                             inv_transform: Optional[Callable] = None):
         self.cfg = cfg
         self.lower_image_size = OmegaConf.to_object(self.cfg.trainer.lower_image_size)
-        self.img_size = OmegaConf.to_object(self.cfg.trainer.img_size)
+        try:
+            self.img_size = OmegaConf.to_object(self.cfg.trainer.img_size)
+        except:
+            self.img_size = self.cfg.trainer.img_size
         if root is not None:
             self.root = root
         else:
