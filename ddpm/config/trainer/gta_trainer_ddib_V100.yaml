@@ -53,7 +53,7 @@ warmup: 5000 #help='learning rate warmup')
 batch_size: 32 #help='batch size')
 microbatch: 8
 num_workers: 4 #help='workers of Dataloader')
-ema_decay: 0.9999 #help="ema decay rate")
+ema_decay: 0.999 #help="ema decay rate")
 weight_decay: 0.999
 # parallel: True #help='multi gpu training')
 # unique_img: False #help='Train a model on a single image.')
@@ -69,7 +69,8 @@ logdir: /mnt/scitas/bastien/logs/GTA #help='log directory')
 wandb_entity: bastienvd #help='wandb id to use')
 sample_size: 8 #"sampling size of images")
 sample_step: 10000 #help='frequency of sampling')
-ml_exp_name: GTA_Diffusion_x256 #help = 'name of the experience on wandb')
+ml_exp_name: GTA_Diffusion_x${trainer.img_size} #help = 'name of the experience on wandb')
+output_dir: ${trainer.logdir}
 checkpointpath: #/mnt/scitas/bastien/logs/Audio/ckpt_350000.pt
 
 # Evaluation

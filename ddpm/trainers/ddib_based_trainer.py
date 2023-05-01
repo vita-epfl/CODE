@@ -169,8 +169,9 @@ class DDIB_Trainer(BaseTrainer):
             self.sched = torch.optim.lr_scheduler.LambdaLR(self.optimizer, lr_lambda=self.warmup_lr)
         else:
             self.sched = None
+        self.step = 0
         self.resume_step = 0
-        self.lr_anneal_steps = self.cfg.trainer.total_steps * 10
+        self.lr_anneal_steps = self.cfg.trainer.total_steps 
 
         self.train_dataset, self.test_dataset = get_dataset(None, self.cfg)
 
@@ -231,6 +232,7 @@ class DDIB_Trainer(BaseTrainer):
         self.net_model.train()
         self.mp_trainer.zero_grad()
         for step in range(self.cfg.trainer.total_steps):
+            self.step = step + self.resume_step
             batch, _ = next(self.datalooper)
             batch = batch.cuda(self.cfg.trainer.gpu)
             number_of_accumulation = len(range(0, batch.shape[0], self.microbatch))
@@ -257,87 +259,76 @@ class DDIB_Trainer(BaseTrainer):
 
                 loss = (losses["loss"] * weights).mean() / number_of_accumulation
                 if self.writer is not None:
-                    if (loss.detach().cpu().item() * number_of_accumulation) < 2.5:
+                    if (loss.detach().cpu().item() * number_of_accumulation * 100) < 2.5:
                         self.writer.add_scalar('loss', loss.detach().cpu().item() * number_of_accumulation, step)
                     else:
-                        self.writer.add_scalar('weird_loss', loss.detach().cpu().item() * number_of_accumulation, step)
-                # log_loss_dict(
-                #     self.diffusion, t, {k: v * weights for k, v in losses.items()}
-                # )
+                        self.writer.add_scalar('weird_loss', loss.detach().cpu().item() * number_of_accumulation * 100, step)
+
                 self.mp_trainer.backward(loss)
             took_step = self.mp_trainer.optimize(self.optimizer)
             if took_step:
                 ema(self.net_model, self.ema_model, self.cfg.trainer.ema_decay)
+            else: 
+                print(f"NaN at step {self.step}")
             if self.sched is not None:
                 self.sched.step()
             else:
                 self._anneal_lr()
 
-            # log
-            if self.cfg.trainer.sample_step > 0 and step % self.cfg.trainer.sample_step == 0:                
-                self.net_model.eval()
-                self.ema_model.eval()
-                if self.writer is not None:
-                    grid_ori = make_grid(batch) 
-                    img_grid_ori = wandb.Image(grid_ori.permute(1,2,0).cpu().numpy())
-                    wandb.log({"Original_Image": img_grid_ori}) 
-                if step >= 0 :
-                    with torch.no_grad():
-                        x_0 = self.diffusion.p_sample_loop(self.net_model, shape = self.x_T.shape,noise=self.x_T,
-                                                                    clip_denoised=True,)
-                        grid = make_grid(x_0)
-                        path = os.path.join(
-                            self.cfg.trainer.logdir, 'sample', 'ddpm_%d.png' % step)
-                        if self.writer is not None:
-                            # try:
-                            #     save_image(grid, path)
-                            # except Exception:
-                            #     LOG.warnings("Problem with saving image")
-                            img_grid = wandb.Image(grid.permute(1,2,0).cpu().numpy())
-                            wandb.log({"Sample_DDPM": img_grid})
+            self.log(batch)
+    # log
+    def log(self, batch):
+        if self.cfg.trainer.sample_step > 0 and self.step % self.cfg.trainer.sample_step == 0:                
+            self.net_model.eval()
+            self.ema_model.eval()
+            if self.writer is not None:
+                grid_ori = make_grid(batch) 
+                img_grid_ori = wandb.Image(grid_ori.permute(1,2,0).cpu().numpy())
+                wandb.log({"Original_Image": img_grid_ori}) 
+            if self.step > 0 :
+                with torch.no_grad():
+                    x_0 = self.diffusion.p_sample_loop(self.net_model, shape = self.x_T.shape,noise=self.x_T,
+                                                                clip_denoised=True,)
+                    grid = make_grid(x_0)
+                    path = os.path.join(
+                        self.cfg.trainer.logdir, 'sample', 'ddpm_%d.png' % self.step)
+                    if self.writer is not None:
+                        img_grid = wandb.Image(grid.permute(1,2,0).cpu().numpy())
+                        wandb.log({"Sample_DDPM": img_grid})
 
-                    with torch.no_grad():
-                        x_0_ddim = self.spaced_diffusion.ddim_sample_loop(self.net_model, shape = self.x_T.shape,noise=self.x_T,
-                                                                    clip_denoised=True,)
-                        grid_ddim = make_grid(x_0_ddim)
-                        path = os.path.join(
-                            self.cfg.trainer.logdir, 'sample', 'ddim_%d.png' % step)
-                        if self.writer is not None:
-                            # try:
-                            #     save_image(grid, path)
-                            # except Exception:
-                            #     LOG.warnings("Problem with saving image")
-                            img_grid_ddim = wandb.Image(grid_ddim.permute(1,2,0).cpu().numpy())
-                            wandb.log({"Sample_DDIM": img_grid_ddim})
-                    
-                    with torch.no_grad():
-                        x_0_ddim_ema = self.spaced_diffusion.ddim_sample_loop(self.ema_model, shape = self.x_T.shape,noise=self.x_T,
-                                                                    clip_denoised=True,)
-                        grid_ddim_ema = make_grid(x_0_ddim_ema)
-                        path = os.path.join(
-                            self.cfg.trainer.logdir, 'sample', 'ddim_ema%d.png' % step)
-                        if self.writer is not None:
-                            # try:
-                            #     save_image(grid, path)
-                            # except Exception:
-                            #     LOG.warnings("Problem with saving image")
-                            img_grid_ddim_ema = wandb.Image(grid_ddim_ema.permute(1,2,0).cpu().numpy())
-                            wandb.log({"Sample_DDIM_EMA": img_grid_ddim_ema})
-                self.net_model.train()
-                self.ema_model.train()
+                with torch.no_grad():
+                    x_0_ddim = self.spaced_diffusion.ddim_sample_loop(self.net_model, shape = self.x_T.shape,noise=self.x_T,
+                                                                clip_denoised=True,)
+                    grid_ddim = make_grid(x_0_ddim)
+                    path = os.path.join(
+                        self.cfg.trainer.logdir, 'sample', 'ddim_%d.png' % self.step)
+                    if self.writer is not None:
+                        img_grid_ddim = wandb.Image(grid_ddim.permute(1,2,0).cpu().numpy())
+                        wandb.log({"Sample_DDIM": img_grid_ddim})
+                
+                with torch.no_grad():
+                    x_0_ddim_ema = self.spaced_diffusion.ddim_sample_loop(self.ema_model, shape = self.x_T.shape,noise=self.x_T,
+                                                                clip_denoised=True,)
+                    grid_ddim_ema = make_grid(x_0_ddim_ema)
+                    path = os.path.join(
+                        self.cfg.trainer.logdir, 'sample', 'ddim_ema%d.png' % self.step)
+                    if self.writer is not None:
+                        img_grid_ddim_ema = wandb.Image(grid_ddim_ema.permute(1,2,0).cpu().numpy())
+                        wandb.log({"Sample_DDIM_EMA": img_grid_ddim_ema})
+            self.net_model.train()
+            self.ema_model.train()
 
-            # save
-            if self.cfg.trainer.save_step > 0 and step % self.cfg.trainer.save_step == 0:
-                ckpt = {
-                    'net_model': self.net_model.state_dict(),
-                    'ema_model': self.ema_model.state_dict(),
-                    'sched': self.sched.state_dict(),
-                    'optim': self.optimizer.state_dict(),
-                    'x_T': self.x_T,
-                    'step': step,
-                    "config": OmegaConf.to_container(self.cfg)
-                }
-                torch.save(ckpt, os.path.join(self.cfg.trainer.logdir, f'ckpt_{step}.pt'))
+        # save
+        if self.cfg.trainer.save_step > 0 and self.step % self.cfg.trainer.save_step == 0 and self.step > 0:
+            ckpt = {
+                'net_model': self.net_model.state_dict(),
+                'ema_model': self.ema_model.state_dict(),
+                'optim': self.optimizer.state_dict(),
+                'x_T': self.x_T,
+                'step': self.step,
+                "config": OmegaConf.to_container(self.cfg)
+            }
+            torch.save(ckpt, os.path.join(self.cfg.trainer.logdir, f'ckpt_{self.step}.pt'))
 
 
     def create_diffusion(self,):

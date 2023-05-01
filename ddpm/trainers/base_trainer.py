@@ -199,9 +199,10 @@ class BaseTrainer(object):
         torch.cuda.set_device(self.cfg.trainer.gpu)
         dist.barrier()
 
+
     def checkpoint(self) -> submitit.helpers.DelayedSubmission:
         print("Requeuing SLURM job", OmegaConf.to_yaml(self.cfg))
-        empty_trainer = type(self)(self.cfg)
+       
         if (self.model is not None) and (self.optimizer is not None):
             self.checkpoint_dump(
                 checkpoint_path=self.cfg.trainer.checkpointpath,
@@ -211,6 +212,7 @@ class BaseTrainer(object):
             )
         else:
             pass
+        empty_trainer = type(self)(self.cfg)
         print("Sending Delayed Submission...")
         return submitit.helpers.DelayedSubmission(empty_trainer)
 
@@ -230,13 +232,14 @@ class BaseTrainer(object):
 
         if checkpoint_path is None:
             prefix = self.cfg.trainer.output_dir
-            if self.cfg.trainer.platform == "local": # Hydra changes base directory
-                prefix = ''
-            if epoch == 0:
-                checkpoint_path = os.path.join(prefix, "default_checkpoint.pt")
-            else:
-                checkpoint_path = os.path.join(prefix, f"checkpoint_epoch_{str(epoch)}.pt")
-
+            # if self.cfg.trainer.platform == "local": # Hydra changes base directory
+            #     prefix = ''
+            checkpoint_path = os.path.join(prefix, "default_checkpoint.pt")
+            # if epoch == 0:
+            #     checkpoint_path = os.path.join(prefix, "default_checkpoint.pt")
+            # else:
+            #     checkpoint_path = os.path.join(prefix, f"checkpoint_epoch_{str(epoch)}.pt")
+        
         torch.save(
             {
                 "epoch": epoch,
@@ -247,6 +250,8 @@ class BaseTrainer(object):
             },
             checkpoint_path,
         )
+        with open_dict(self.cfg):
+            self.cfg.trainer.checkpointpath = checkpoint_path
 
     def checkpoint_load(self, checkpoint_path: Union[str, Path]) -> Optional[Dict]:
         if not checkpoint_path:
