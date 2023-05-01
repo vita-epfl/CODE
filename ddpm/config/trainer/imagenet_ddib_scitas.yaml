@@ -10,12 +10,13 @@ eval: False #load ckpt.pt and evaluate FID and IS
 datapath: /work/vita/datasets/imagenet #help='dataset path if downloaded
 dataset: IMAGENET #help='dataset name')
 split: all
-corruption: [frost] #help=corruption type base on Imagenet-C
+corruption: [pixelate] #help=corruption type base on Imagenet-C
 corruption_severity: [5] #help='corruption severity level 1-5'
 random_flip: False #help='Whether to use random flip in training')
 
 #original_img_size [1052,1914]
-original_img_size: [1052,1914]
+lower_image_size: 
+original_img_size: [256,256]
 img_size: 256 #help='image size')
 center_crop: True
 
@@ -41,15 +42,17 @@ schedule_sampler: "uniform"
 loss_type: RESCALED_MSE
 
 # Training
-lr: 2e-5 #help='target learning rate')
+lr: 1e-6 #help='target learning rate')
 grad_clip: 3. #help="gradient norm clipping")
 total_steps: 1000000 #help='total training steps')
-warmup: 5000 #help='learning rate warmup')
-batch_size: 32 #help='batch size')
-microbatch: 8
+warmup: 0 #help='learning rate warmup')
+batch_size: 16 #help='batch size')
+microbatch: 2
 num_workers: 4 #help='workers of Dataloader')
-ema_decay: 0.9999 #help="ema decay rate")
+ema_decay: 0.999 #help="ema decay rate")
 weight_decay: 0.999
+fp16_scale_growth: 1e-3
+use_fp16: True
 # parallel: True #help='multi gpu training')
 # unique_img: False #help='Train a model on a single image.')
 
@@ -57,17 +60,17 @@ weight_decay: 0.999
 use_half_for_matmul: False
 use_half_for_conv: False
 use_half_precision: False
-use_fp16: False
 
 # Logging & Sampling
-logdir: /work/vita/bastien/logs/GTA #help='log directory')
+logdir: /work/vita/bastien/logs/${trainer.dataset} #help='log directory')
 wandb_entity: bastienvd #help='wandb id to use')
 sample_size: 8 #"sampling size of images")
-sample_step: 10000 #help='frequency of sampling')
-ml_exp_name: Imagenet_Diffusion_${trainer.corruption}_x${trainer.img_size} #help = 'name of the experience on wandb')
+sample_step: 2000 #help='frequency of sampling')
+ml_exp_name: Imagenet_Diffusion_pixelate_x${trainer.img_size} #help = 'name of the experience on wandb')
 checkpointpath: #/mnt/scitas/bastien/logs/Audio/ckpt_350000.pt
 load_imagenet_256_ckpt: True
 imagenet_256_ckpt: /work/vita/bastien/logs/ImageNet/256/256x256_diffusion_uncond.pt
+timesteps_respacing: ddim50
 
 # Evaluation
 save_step: 50000 #help='frequency of saving checkpoints, 0 to disable during training')
@@ -78,11 +81,11 @@ fid_cache: ./stats/cifar10.train.npz #help='FID cache')
 
 # Mode slurm
 slurm:
-  nodes: 1 # 2
+  nodes: 2 # 2
   gpus_per_node: 2  # max 2
   cpus_per_task: 10
   mem: 72 # in GiB 48
-  timeout: 48 # hours
+  timeout: 24 # hours
   partition: gpu
   qos: gpu
   account: vita # optional

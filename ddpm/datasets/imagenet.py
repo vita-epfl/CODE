@@ -19,12 +19,12 @@ class Imagenet_Dataset(VisionDataset):
     def __init__(self, cfg, root: Optional[str] = None, 
                             split: Optional[str] = None, 
                             corruption: Optional[List[str]] = None, 
-                            corruption_severity: Optional[List[int]] = 1,
+                            corruption_severity: Optional[List[int]] = None,
                             transform: Optional[Callable] = None,
                             inv_transform: Optional[Callable] = None):
         self.cfg = cfg
-        self.lower_image_size = OmegaConf.to_object(self.cfg.trainer.lower_image_size)
-        self.img_size = OmegaConf.to_object(self.cfg.trainer.img_size)
+        # self.lower_image_size = OmegaConf.to_object(self.cfg.trainer.lower_image_size)
+        # self.img_size = OmegaConf.to_object(self.cfg.trainer.img_size)
 
         if root is not None:
             self.root = root
@@ -57,6 +57,7 @@ class Imagenet_Dataset(VisionDataset):
         self.original_images = []
         valid_splits = ("train",  "val", "all")
         assert self.split in valid_splits
+
         if self.corruption is None:
             if self.split == "all":
                 for split in ["train", "val"]:
@@ -76,14 +77,14 @@ class Imagenet_Dataset(VisionDataset):
             self.original_image_dir = os.path.join(self.root,'val')
             self.image_c_dir = os.path.join(self.root, "imagenet-c")
             for corruption in self.corruption:
-                corrupted_image_dir = os.path.join(self.image_c_dir, self.corruption)
+                corrupted_image_dir = os.path.join(self.image_c_dir, corruption)
                 for severity in self.corruption_severity:
-                    severity_subdir = os.path.join(corrupted_image_dir, severity)
+                    severity_subdir = os.path.join(corrupted_image_dir, str(severity))
                     for img_subdir in os.listdir(severity_subdir): 
                         img_subdir_path = os.path.join(severity_subdir, img_subdir)
                         original_subdir_path = os.path.join(self.original_image_dir, img_subdir)
                         for file_name in os.listdir(img_subdir_path):
-                            self.images.append(os.path.join(img_subdir, file_name))
+                            self.images.append(os.path.join(img_subdir_path, file_name))
                             self.original_images.append(os.path.join(original_subdir_path, file_name))
 
 

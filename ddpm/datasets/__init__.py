@@ -235,7 +235,6 @@ def get_dataset(args, cfg):
     
     elif dataset_name == "IMAGENET":
         print("dataset_name :", dataset_name)
-        first_crop = args.first_crop
         if cfg.trainer.center_crop:
             if cfg.trainer.random_flip:
                 train_transform =  transforms.Compose(

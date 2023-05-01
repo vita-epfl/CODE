@@ -39,6 +39,7 @@ from ddpm.ddib_diffusion import GaussianDiffusion, SpacedDiffusion, ModelMeanTyp
 from ddpm.ddib_model import UNetModel
 from ddpm.ddib_utils import *
 from ddpm.ddib_samplers import LossAwareSampler, UniformSampler, create_named_schedule_sampler
+from ddpm.fp_16_utils import MixedPrecisionTrainer
 import wandb
 
 LOG = logging.getLogger(__name__)
@@ -107,23 +108,7 @@ class DDIB_Trainer(BaseTrainer):
         return min(step, self.cfg.trainer.warmup) / self.cfg.trainer.warmup
 
     def setup_trainer(self) -> None:
-        if self.cfg.trainer.use_half_for_matmul:
-            torch.backends.cuda.matmul.allow_tf32 = True
-        else:
-            torch.backends.cuda.matmul.allow_tf32 = False
 
-        if self.cfg.trainer.use_half_for_conv:
-            torch.backends.cudnn.allow_tf32 = True
-        else:
-            torch.backends.cudnn.allow_tf32 = False
-
-        if self.cfg.trainer.use_fp16:
-            self.scaler = torch.cuda.amp.GradScaler()
-            self.half_precision = True
-        else:
-            self.half_precision = False
-        
-        print("Using fp16 precision:", self.half_precision)
         LOG.info(f"CityscapeTrainer: {self.cfg.trainer.rank}, gpu: {self.cfg.trainer.gpu}")
         warnings.simplefilter(action='ignore', category=FutureWarning)
         os.makedirs(os.path.join(self.cfg.trainer.logdir, 'sample'), exist_ok=True)
@@ -179,8 +164,13 @@ class DDIB_Trainer(BaseTrainer):
         self.create_model()
 
         # self.optimizer = torch.optim.Adam(self.net_model.parameters(), lr=self.cfg.trainer.lr)
-        self.optimizer = torch.optim.AdamW(self.net_model.parameters(), lr=self.cfg.trainer.lr, weight_decay=self.cfg.trainer.weight_decay)
-        self.sched = torch.optim.lr_scheduler.LambdaLR(self.optimizer, lr_lambda=self.warmup_lr)
+        self.optimizer = torch.optim.AdamW(self.mp_trainer.master_params, lr=self.cfg.trainer.lr, weight_decay=self.cfg.trainer.weight_decay)
+        if self.cfg.trainer.warmup > 0:
+            self.sched = torch.optim.lr_scheduler.LambdaLR(self.optimizer, lr_lambda=self.warmup_lr)
+        else:
+            self.sched = None
+        self.resume_step = 0
+        self.lr_anneal_steps = self.cfg.trainer.total_steps * 10
 
         self.train_dataset, self.test_dataset = get_dataset(None, self.cfg)
 
@@ -228,9 +218,18 @@ class DDIB_Trainer(BaseTrainer):
         print('Model params: %.2f M' % (model_size / 1024 / 1024))
 
 
+    def _anneal_lr(self):
+            if not self.lr_anneal_steps:
+                return
+            frac_done = (self.step + self.resume_step) / self.lr_anneal_steps
+            lr = self.cfg.trainer.lr * (1 - frac_done)
+            for param_group in self.optimizer.param_groups:
+                param_group["lr"] = lr
+
+
     def train(self,) -> None:
         self.net_model.train()
-        self.optimizer.zero_grad()
+        self.mp_trainer.zero_grad()
         for step in range(self.cfg.trainer.total_steps):
             batch, _ = next(self.datalooper)
             batch = batch.cuda(self.cfg.trainer.gpu)
@@ -265,12 +264,14 @@ class DDIB_Trainer(BaseTrainer):
                 # log_loss_dict(
                 #     self.diffusion, t, {k: v * weights for k, v in losses.items()}
                 # )
-                loss.backward()
-            self.optimizer.step()
-            self.sched.step()
-            self.optimizer.zero_grad()
-
-            ema(self.net_model, self.ema_model, self.cfg.trainer.ema_decay)
+                self.mp_trainer.backward(loss)
+            took_step = self.mp_trainer.optimize(self.optimizer)
+            if took_step:
+                ema(self.net_model, self.ema_model, self.cfg.trainer.ema_decay)
+            if self.sched is not None:
+                self.sched.step()
+            else:
+                self._anneal_lr()
 
             # log
             if self.cfg.trainer.sample_step > 0 and step % self.cfg.trainer.sample_step == 0:                
@@ -282,50 +283,44 @@ class DDIB_Trainer(BaseTrainer):
                     wandb.log({"Original_Image": img_grid_ori}) 
                 if step >= 0 :
                     with torch.no_grad():
-                        if self.half_precision:
-                            with torch.cuda.amp.autocast():
-                                x_0 = self.diffusion.p_sample_loop(self.net_model, shape = self.x_T.shape,noise=self.x_T,
-                                                                    clip_denoised=True,)
-                        else:
-                            x_0 = self.diffusion.p_sample_loop(self.net_model, shape = self.x_T.shape,noise=self.x_T,
+                        x_0 = self.diffusion.p_sample_loop(self.net_model, shape = self.x_T.shape,noise=self.x_T,
                                                                     clip_denoised=True,)
                         grid = make_grid(x_0)
                         path = os.path.join(
                             self.cfg.trainer.logdir, 'sample', 'ddpm_%d.png' % step)
                         if self.writer is not None:
-                            save_image(grid, path)
+                            # try:
+                            #     save_image(grid, path)
+                            # except Exception:
+                            #     LOG.warnings("Problem with saving image")
                             img_grid = wandb.Image(grid.permute(1,2,0).cpu().numpy())
                             wandb.log({"Sample_DDPM": img_grid})
 
                     with torch.no_grad():
-                        if self.half_precision:
-                            with torch.cuda.amp.autocast():
-                                x_0_ddim = self.diffusion.ddim_sample_loop(self.net_model, shape = self.x_T.shape,noise=self.x_T,
-                                                                    clip_denoised=True,)
-                        else:
-                            x_0_ddim = self.diffusion.ddim_sample_loop(self.net_model, shape = self.x_T.shape,noise=self.x_T,
+                        x_0_ddim = self.spaced_diffusion.ddim_sample_loop(self.net_model, shape = self.x_T.shape,noise=self.x_T,
                                                                     clip_denoised=True,)
                         grid_ddim = make_grid(x_0_ddim)
                         path = os.path.join(
                             self.cfg.trainer.logdir, 'sample', 'ddim_%d.png' % step)
                         if self.writer is not None:
-                            save_image(grid_ddim, path)
+                            # try:
+                            #     save_image(grid, path)
+                            # except Exception:
+                            #     LOG.warnings("Problem with saving image")
                             img_grid_ddim = wandb.Image(grid_ddim.permute(1,2,0).cpu().numpy())
                             wandb.log({"Sample_DDIM": img_grid_ddim})
                     
                     with torch.no_grad():
-                        if self.half_precision:
-                            with torch.cuda.amp.autocast():
-                                x_0_ddim_ema = self.diffusion.ddim_sample_loop(self.ema_model, shape = self.x_T.shape,noise=self.x_T,
-                                                                    clip_denoised=True,)
-                        else:
-                            x_0_ddim_ema = self.diffusion.ddim_sample_loop(self.ema_model, shape = self.x_T.shape,noise=self.x_T,
+                        x_0_ddim_ema = self.spaced_diffusion.ddim_sample_loop(self.ema_model, shape = self.x_T.shape,noise=self.x_T,
                                                                     clip_denoised=True,)
                         grid_ddim_ema = make_grid(x_0_ddim_ema)
                         path = os.path.join(
                             self.cfg.trainer.logdir, 'sample', 'ddim_ema%d.png' % step)
                         if self.writer is not None:
-                            save_image(grid_ddim_ema, path)
+                            # try:
+                            #     save_image(grid, path)
+                            # except Exception:
+                            #     LOG.warnings("Problem with saving image")
                             img_grid_ddim_ema = wandb.Image(grid_ddim_ema.permute(1,2,0).cpu().numpy())
                             wandb.log({"Sample_DDIM_EMA": img_grid_ddim_ema})
                 self.net_model.train()
@@ -446,6 +441,7 @@ class DDIB_Trainer(BaseTrainer):
 
         if self.cfg.trainer.load_imagenet_256_ckpt:
             self.load_imagenet_256()
+
         else:
             self.net_model = UNetModel(self.image_size,
                         in_channels = self.cfg.trainer.input_channel,
@@ -468,7 +464,8 @@ class DDIB_Trainer(BaseTrainer):
                         use_new_attention_order=False)
 
         self.ema_model = copy.deepcopy(self.net_model)
-
+        if self.cfg.trainer.use_fp16:
+            self.ema_model.convert_to_fp16()
         if self.net_model_state_dict is not None:
             self.net_model.load_state_dict(self.net_model_state_dict)
         if self.ema_model_state_dict is not None:
@@ -476,6 +473,12 @@ class DDIB_Trainer(BaseTrainer):
         
         self.net_model = self.net_model.cuda(self.cfg.trainer.gpu)
         self.ema_model = self.ema_model.cuda(self.cfg.trainer.gpu)
+        
+        self.mp_trainer = MixedPrecisionTrainer(
+            model=self.net_model,
+            use_fp16=self.cfg.trainer.use_fp16,
+            fp16_scale_growth=self.cfg.trainer.fp16_scale_growth,
+        )
         self.net_model = DistributedDataParallel(self.net_model, device_ids=[self.cfg.trainer.gpu])
         self.ema_model = DistributedDataParallel(self.ema_model, device_ids=[self.cfg.trainer.gpu])
 
@@ -526,14 +529,14 @@ class DDIB_Trainer(BaseTrainer):
 
         ckpt_imagenet = torch.load(self.cfg.trainer.imagenet_256_ckpt)
         self.net_model.load_state_dict(ckpt_imagenet)
-        self.ema_model = copy.deepcopy(self.net_model) 
-        if use_fp16:
-            self.net_model.convert_to_fp16()
-            self.ema_model.convert_to_fp16()
-        self.net_model = self.net_model.cuda(self.cfg.trainer.gpu)
-        self.ema_model = self.ema_model.cuda(self.cfg.trainer.gpu)
-        self.net_model = DistributedDataParallel(self.net_model, device_ids=[self.cfg.trainer.gpu])
-        self.ema_model = DistributedDataParallel(self.ema_model, device_ids=[self.cfg.trainer.gpu])
+        self.ema_model = copy.deepcopy(self.net_model)         
+        # if use_fp16:
+        #     self.net_model.convert_to_fp16()
+        #     self.ema_model.convert_to_fp16()
+        # self.net_model = self.net_model.cuda(self.cfg.trainer.gpu)
+        # self.ema_model = self.ema_model.cuda(self.cfg.trainer.gpu)
+        # self.net_model = DistributedDataParallel(self.net_model, device_ids=[self.cfg.trainer.gpu])
+        # self.ema_model = DistributedDataParallel(self.ema_model, device_ids=[self.cfg.trainer.gpu])
 
         # show model size
         model_size = 0
