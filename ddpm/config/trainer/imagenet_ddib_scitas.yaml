@@ -65,7 +65,7 @@ use_half_precision: False
 logdir: /work/vita/bastien/logs/${trainer.dataset} #help='log directory')
 wandb_entity: bastienvd #help='wandb id to use')
 sample_size: 6 #"sampling size of images")
-sample_step: 1000 #help='frequency of sampling')
+sample_step: 10 #help='frequency of sampling')
 ml_exp_name: Imagenet_${trainer.ch}ch_${trainer.load_imagenet_256_ckpt}_${trainer.corruption}_x${trainer.img_size} #help = 'name of the experience on wandb')
 checkpointpath: #/mnt/scitas/bastien/logs/Audio/ckpt_350000.pt
 load_imagenet_256_ckpt: True
@@ -83,7 +83,7 @@ fid_cache: ./stats/cifar10.train.npz #help='FID cache')
 
 # Mode slurm
 slurm:
-  nodes: 2 # 2
+  nodes: 1 # 2
   gpus_per_node: 2  # max 2
   cpus_per_task: 10
   mem: 72 # in GiB 48
