@@ -10,28 +10,32 @@ eval: False #load ckpt.pt and evaluate FID and IS
 datapath: /work/vita/datasets/imagenet #help='dataset path if downloaded
 dataset: IMAGENET #help='dataset name')
 split: all
-corruption: [pixelate] #help=corruption type base on Imagenet-C
+corruption: [snow] #help=corruption type base on Imagenet-C
 corruption_severity: [5] #help='corruption severity level 1-5'
 random_flip: False #help='Whether to use random flip in training')
 
 #original_img_size [1052,1914]
 lower_image_size: 
-original_img_size: [256,256]
-img_size: 256 #help='image size')
+original_img_size: [128,128]
+img_size: 128 #help='image size')
 center_crop: True
 
 # UNet
 input_channel: 3
 kernel_size: 3
-ch: 128  #help='base channel of UNet')
+ch: 256  #help='base channel of UNet')
 ch_mult:  #help='channel multiplier')
 attention_resolutions: "32,16,8"
 # attn: [3,4,5] #help='add attention to these levels')
 num_res_blocks: 2 #help='# resblock in each level')
 dropout: 0.01 #help='dropout rate of resblock')
+num_heads: 4
+num_head_channels: -1
+use_scale_shift_norm: True
+resblock_updown: True
 
 # Gaussian Diffusion
-beta_schedule: "cosine"
+beta_schedule: "linear"
 num_timesteps: 1000 #help='total diffusion steps')
 # beta_1: 1e-4 #help='start beta value')
 # beta_T: 0.02 #help='end beta value')
@@ -43,16 +47,16 @@ loss_type: RESCALED_MSE
 
 # Training
 lr: 1e-6 #help='target learning rate')
-grad_clip: 3. #help="gradient norm clipping")
+grad_clip: 2. #help="gradient norm clipping")
 total_steps: 1000000 #help='total training steps')
 warmup: 0 #help='learning rate warmup')
-batch_size: 16 #help='batch size')
+batch_size: 32 #help='batch size')
 microbatch: 2
 num_workers: 4 #help='workers of Dataloader')
 ema_decay: 0.999 #help="ema decay rate")
 weight_decay: 0.999
 fp16_scale_growth: 1e-3
-use_fp16: True
+use_fp16: False
 # parallel: True #help='multi gpu training')
 # unique_img: False #help='Train a model on a single image.')
 
@@ -64,16 +68,16 @@ use_half_precision: False
 # Logging & Sampling
 logdir: /work/vita/bastien/logs/${trainer.dataset} #help='log directory')
 wandb_entity: bastienvd #help='wandb id to use')
-sample_size: 8 #"sampling size of images")
+sample_size: 4 #"sampling size of images")
 sample_step: 2000 #help='frequency of sampling')
-ml_exp_name: Imagenet_Diffusion_pixelate_x${trainer.img_size} #help = 'name of the experience on wandb')
+ml_exp_name: Imagenet_${trainer.ch}ch_${trainer.load_imagenet_256_ckpt}_${trainer.corruption}_x${trainer.img_size} #help = 'name of the experience on wandb')
 checkpointpath: #/mnt/scitas/bastien/logs/Audio/ckpt_350000.pt
-load_imagenet_256_ckpt: True
+load_imagenet_256_ckpt: False
 imagenet_256_ckpt: /work/vita/bastien/logs/ImageNet/256/256x256_diffusion_uncond.pt
 timesteps_respacing: ddim50
 
 # Evaluation
-save_step: 50000 #help='frequency of saving checkpoints, 0 to disable during training')
+save_step: 10000 #help='frequency of saving checkpoints, 0 to disable during training')
 eval_step: 0 #help='frequency of evaluating model, 0 to disable during training')
 num_images: 50000 #help='the number of generated images for evaluation')
 fid_use_torch: False #help='calculate IS and FID on gpu')
@@ -85,8 +89,8 @@ slurm:
   gpus_per_node: 2  # max 2
   cpus_per_task: 10
   mem: 72 # in GiB 48
-  timeout: 24 # hours
+  timeout: 72 # hours
   partition: gpu
   qos: gpu
   account: vita # optional
-  reservation: vita-neurips
+  reservation: 

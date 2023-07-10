@@ -186,7 +186,8 @@ class DDIB_Trainer(BaseTrainer):
             batch_size=self.cfg.trainer.batch_size,
             )
         self.datalooper = infiniteloop(self.train_dataloader)
-        
+        self.total_batch = self.cfg.trainer.world_size * self.cfg.trainer.batch_size
+         
         if self.test_dataset is not None:
             print("test dataset length",len(self.test_dataset))
             self.test_dataloader = create_dataloader(
@@ -200,7 +201,8 @@ class DDIB_Trainer(BaseTrainer):
             self.test_dataloader = self.train_dataloader
             self.test_dataset = self.train_dataset
 
-
+        self.steps_in_one_epoch = len(self.train_dataset) // self.total_batch
+        LOG.info(f"Number of step per epoch: {self.steps_in_one_epoch}")
         self.microbatch = self.cfg.trainer.microbatch if (self.cfg.trainer.microbatch is not None and self.cfg.trainer.microbatch > 0)  else self.cfg.trainer.batch_size
 
         if self.cfg.trainer.load_imagenet_256_ckpt:
@@ -479,7 +481,6 @@ class DDIB_Trainer(BaseTrainer):
             fp16_scale_growth=self.cfg.trainer.fp16_scale_growth,
         )
         self.ddp_model = DistributedDataParallel(self.net_model, device_ids=[self.cfg.trainer.gpu])
-        # self.ema_model = DistributedDataParallel(self.ema_model, device_ids=[self.cfg.trainer.gpu])
 
         # show model size
         model_size = 0

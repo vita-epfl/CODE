@@ -2,7 +2,7 @@ defaults:
   - base_trainer
 name: gta_diffusion
 platform: slurm
-type: cityscape
+type: ddib
 
 train: True #train from scratch
 eval: False #load ckpt.pt and evaluate FID and IS
@@ -16,35 +16,63 @@ random_flip: False #help='Whether to use random flip in training')
 
 original_img_size: [1052,1914]
 first_crop: [1024,1904]
-lower_image_size: [64, 119] #[270,430]
-img_size: [64, 64] #help='image size')
+lower_image_size: [256, 476] #[270,430]
+img_size: 256 #help='image size')
 
 # UNet
 input_channel: 3
 kernel_size: 3
 ch: 128  #help='base channel of UNet')
-ch_mult: [1, 2, 2, 4, 8] #help='channel multiplier')
-attn: [2,3,4] #help='add attention to these levels')
-num_res_blocks: 4 #help='# resblock in each level')
-dropout: 0.1 #help='dropout rate of resblock')
+ch_mult:  #help='channel multiplier')
+attention_resolutions: "32,16,8"
+attn: [3,4,5] #help='add attention to these levels')
+num_res_blocks: 2 #help='# resblock in each level')
+dropout: 0.01 #help='dropout rate of resblock')
+num_heads: 4
+num_head_channels: -1
+use_scale_shift_norm: True
+resblock_updown: True
 
 # Gaussian Diffusion
-beta_1: 1e-4 #help='start beta value')
-beta_T: 0.02 #help='end beta value')
-T: 1000 #help='total diffusion steps')
-mean_type: epsilon #['xprev', 'xstart', 'epsilon'], help='predict variable')
-var_type: 'fixedlarge' #['fixedlarge', 'fixedsmall'], help='variance type')
+beta_schedule: "cosine"
+num_timesteps: 1000 #help='total diffusion steps')
+# beta_1: 1e-4 #help='start beta value')
+# beta_T: 0.02 #help='end beta value')
+#T: 1000 #help='total diffusion steps')
+mean_type: EPSILON #['PREVIOUS_X', 'START_X', 'EPSILON'], help='predict variable')
+var_type: LEARNED_RANGE #['FIXED_LARGE', 'FIXED_SMALL', LEARNED_RANGE, LEARNED], help='variance type')
+schedule_sampler: "uniform"
+loss_type: RESCALED_MSE
+# T: 1000 #help='total diffusion steps')
+
+# mean_type: epsilon #['xprev', 'xstart', 'epsilon'], help='predict variable')
+# var_type: 'fixedlarge' #['fixedlarge', 'fixedsmall'], help='variance type')
+
+# Old Training fir cityscape trainer
+# lr: 3e-5 #help='target learning rate')
+# grad_clip: 1. #help="gradient norm clipping")
+# total_steps: 1000000 #help='total training steps')
+# warmup: 5000 #help='learning rate warmup')
+# batch_size: 16 #help='batch size')
+# num_workers: 2 #help='workers of Dataloader')
+# ema_decay: 0.9999 #help="ema decay rate")
+# parallel: True #help='multi gpu training')
+# unique_img: False #help='Train a model on a single image.')
+# accumulating_step: 4
+
 # Training
-lr: 3e-5 #help='target learning rate')
-grad_clip: 1. #help="gradient norm clipping")
+lr: 1e-5 #help='target learning rate')
+grad_clip: 3. #help="gradient norm clipping")
 total_steps: 1000000 #help='total training steps')
-warmup: 5000 #help='learning rate warmup')
+warmup: 10000 #help='learning rate warmup')
 batch_size: 16 #help='batch size')
-num_workers: 2 #help='workers of Dataloader')
-ema_decay: 0.9999 #help="ema decay rate")
-parallel: True #help='multi gpu training')
-unique_img: False #help='Train a model on a single image.')
-accumulating_step: 4
+microbatch: 4
+num_workers: 12 #help='workers of Dataloader')
+ema_decay: 0.999 #help="ema decay rate")
+weight_decay: 0.999
+fp16_scale_growth: 1e-3
+use_fp16: False
+
 #Mixed Precision
 use_half_for_matmul: False
 use_half_for_conv: False
@@ -53,10 +81,13 @@ use_half_precision: False
 # Logging & Sampling
 logdir: /work/vita/bastien/logs/GTA #help='log directory')
 wandb_entity: bastienvd #help='wandb id to use')
-sample_size: 8 #"sampling size of images")
+sample_size: 4 #"sampling size of images")
 sample_step: 10000 #help='frequency of sampling')
-ml_exp_name: GTA_Diffusion_64x #help = 'name of the experience on wandb')
+ml_exp_name: GTA_Diffusion_256x #help = 'name of the experience on wandb')
 checkpointpath: #/mnt/scitas/bastien/logs/Audio/ckpt_350000.pt
+load_imagenet_256_ckpt: False
+imagenet_256_ckpt: /work/vita/bastien/logs/ImageNet/256/256x256_diffusion_uncond.pt
+timesteps_respacing: ddim50
 
 # Evaluation
 save_step: 50000 #help='frequency of saving checkpoints, 0 to disable during training')
