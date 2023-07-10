@@ -275,7 +275,7 @@ class DDIB_Trainer(BaseTrainer):
             # else:
             #     self._anneal_lr()
             if self.cfg.trainer.gpu == 0:
-                self.log(micro)
+                self.log(batch)
             dist.barrier()
     # log
     def log(self, batch):
@@ -302,10 +302,10 @@ class DDIB_Trainer(BaseTrainer):
                         img_grid = wandb.Image(grid.permute(1,2,0).cpu().numpy())
                         wandb.log({"Sample_DDPM": img_grid})
                         
-            if self.step > 0 :
+            if self.step >= 0 :
                 with torch.no_grad():
                     x_0_ddim = self.spaced_diffusion.ddim_sample_loop(self.ddp_model, shape = self.x_T.shape,noise=self.x_T,
-                                                                clip_denoised=self.cfg.trainer.clip_denoised,
+                                                                clip_denoised=True,
                                                                 progress = self.cfg.trainer.progress)
                     grid_ddim = make_grid(x_0_ddim)
                     path = os.path.join(
@@ -313,10 +313,21 @@ class DDIB_Trainer(BaseTrainer):
                     if self.writer is not None:
                         img_grid_ddim = wandb.Image(grid_ddim.permute(1,2,0).cpu().numpy())
                         wandb.log({"Sample_DDIM": img_grid_ddim})
-                
+
+                with torch.no_grad():
+                    x_0_ddim_noclip = self.spaced_diffusion.ddim_sample_loop(self.ddp_model, shape = self.x_T.shape,noise=self.x_T,
+                                                                clip_denoised=False,
+                                                                progress = self.cfg.trainer.progress)
+                    grid_ddim_noclip = make_grid(x_0_ddim_noclip)
+                    path = os.path.join(
+                        self.cfg.trainer.logdir, 'sample', 'ddim_%d.png' % self.step)
+                    if self.writer is not None:
+                        img_grid_ddim_noclip = wandb.Image(grid_ddim_noclip.permute(1,2,0).cpu().numpy())
+                        wandb.log({"Sample_DDIM_noclipping": img_grid_ddim_noclip})
+
                 with torch.no_grad():
                     x_0_ddim_ema = self.spaced_diffusion.ddim_sample_loop(self.ema_model, shape = self.x_T.shape,noise=self.x_T,
-                                                                clip_denoised=self.cfg.trainer.clip_denoised,
+                                                                clip_denoised=True,
                                                                 progress = self.cfg.trainer.progress)
                     grid_ddim_ema = make_grid(x_0_ddim_ema)
                     path = os.path.join(
@@ -324,6 +335,17 @@ class DDIB_Trainer(BaseTrainer):
                     if self.writer is not None:
                         img_grid_ddim_ema = wandb.Image(grid_ddim_ema.permute(1,2,0).cpu().numpy())
                         wandb.log({"Sample_DDIM_EMA": img_grid_ddim_ema})
+
+                with torch.no_grad():
+                    x_0_ddim_ema_noclip = self.spaced_diffusion.ddim_sample_loop(self.ema_model, shape = self.x_T.shape,noise=self.x_T,
+                                                                clip_denoised=False,
+                                                                progress = self.cfg.trainer.progress)
+                    grid_ddim_ema_noclip = make_grid(x_0_ddim_ema_noclip)
+                    path = os.path.join(
+                        self.cfg.trainer.logdir, 'sample', 'ddim_ema%d.png' % self.step)
+                    if self.writer is not None:
+                        img_grid_ddim_ema_noclip = wandb.Image(grid_ddim_ema_noclip.permute(1,2,0).cpu().numpy())
+                        wandb.log({"Sample_DDIM_EMA_noclipping": img_grid_ddim_ema_noclip})
             # self.net_model.train()
             self.ddp_model.train()
             self.ema_model.train()
@@ -368,7 +390,7 @@ class DDIB_Trainer(BaseTrainer):
         self.betas = get_named_beta_schedule(noise_schedule, diffusion_steps)
         self.diffusion = GaussianDiffusion(betas = self.betas,
                                     model_mean_type = self.model_mean_type,
-                                    model_var_type = self.model_var_type,
+                                    model_var_type = ModelVarType.LEARNED_RANGE,
                                     loss_type = self.loss_type,
                                     rescale_timesteps = False)
 
