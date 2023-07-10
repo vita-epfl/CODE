@@ -1,24 +1,23 @@
 defaults:
   - base_trainer
-name: gta_diffusion
+name: cityscapes_diffusion
 platform: local
 type: ddib
 
 train: True #train from scratch
 eval: False #load ckpt.pt and evaluate FID and IS
 # Dataset
-datapath: /mnt/scitas/datasets/gta5 #help='dataset path if downloaded
-dataset: GTA #help='dataset name')
+datapath: /mnt/scitas/datasets/cityscapes_full #/work/vita/datasets/cityscapes_full  #help='dataset path if downloaded
+dataset: CITYSCAPES_PRETRAINING #help='dataset name')
 split: all
 corruption:  #help=corruption type base on Imagenet-C
 corruption_severity:  #help='corruption severity level 1-5'
 random_flip: False #help='Whether to use random flip in training')
 
-#original_img_size [1052,1914]
-original_img_size: [1052,1914]
-first_crop: [1024,1904]
-lower_image_size: [256, 476] #[270,430]
-img_size: 256 #help='image size')
+original_img_size: [1024,2048]
+first_crop: 
+lower_image_size: [128,256]
+img_size: 128 #help='image size')
 
 # UNet
 input_channel: 3
@@ -27,51 +26,51 @@ ch: 128  #help='base channel of UNet')
 ch_mult:  #help='channel multiplier')
 attention_resolutions: "32,16,8"
 # attn: [3,4,5] #help='add attention to these levels')
-num_res_blocks: 2 #help='# resblock in each level')
-dropout: 0.01 #help='dropout rate of resblock')
+num_res_blocks: 3 #help='# resblock in each level')
+dropout: 0. #help='dropout rate of resblock')
 num_heads: 4
-num_head_channels: -1
-resblock_updown: True
-use_scale_shift_norm: True
+num_head_channels: -1 
+use_scale_shift_norm: False
+resblock_updown: False
 
 # Gaussian Diffusion
-beta_schedule: "cosine"
+beta_schedule: "linear"
 num_timesteps: 1000 #help='total diffusion steps')
-# beta_1: 1e-4 #help='start beta value')
-# beta_T: 0.02 #help='end beta value')
-#T: 1000 #help='total diffusion steps')
 mean_type: EPSILON #['PREVIOUS_X', 'START_X', 'EPSILON'], help='predict variable')
-var_type: LEARNED_RANGE #['FIXED_LARGE', 'FIXED_SMALL', LEARNED_RANGE, LEARNED], help='variance type')
+var_type: FIXED_LARGE #['FIXED_LARGE', 'FIXED_SMALL', LEARNED_RANGE, LEARNED], help='variance type')
 schedule_sampler: "uniform"
 loss_type: RESCALED_MSE
 
 # Training
-lr: 2e-5 #help='target learning rate')
-grad_clip: 3. #help="gradient norm clipping")
+lr: 1e-4 #help='target learning rate')
+grad_clip:  #help="gradient norm clipping")
 total_steps: 1000000 #help='total training steps')
-warmup: 5000 #help='learning rate warmup')
-batch_size: 32 #help='batch size')
-microbatch: 8
+warmup: 0 #help='learning rate warmup')
+batch_size: 48 #help='batch size')
+microbatch: 12
 num_workers: 4 #help='workers of Dataloader')
 ema_decay: 0.999 #help="ema decay rate")
-weight_decay: 0.999
-# parallel: True #help='multi gpu training')
-# unique_img: False #help='Train a model on a single image.')
+weight_decay: 0.01
+fp16_scale_growth: 1e-3
+use_fp16: False
 
 #Mixed Precision
 use_half_for_matmul: False
 use_half_for_conv: False
 use_half_precision: False
-use_fp16: False
 
 # Logging & Sampling
-logdir: /mnt/scitas/bastien/logs/GTA #help='log directory')
+logdir: /mnt/scitas/bastien/logs/Cityscapes #help='log directory')
 wandb_entity: bastienvd #help='wandb id to use')
 sample_size: 8 #"sampling size of images")
 sample_step: 10000 #help='frequency of sampling')
-ml_exp_name: GTA_Diffusion_x${trainer.img_size} #help = 'name of the experience on wandb')
-output_dir: ${trainer.logdir}
+ml_exp_name: Cityscapes_Diffusion_x${trainer.img_size} #help = 'name of the experience on wandb')
 checkpointpath: #/mnt/scitas/bastien/logs/Audio/ckpt_350000.pt
+load_imagenet_256_ckpt: False
+imagenet_256_ckpt: #/mnt/scitas/bastien/logs/ImageNet/256/256x256_diffusion_uncond.pt
+timesteps_respacing: ddim50
+clip_denoised: False
+progress: False
 
 # Evaluation
 save_step: 50000 #help='frequency of saving checkpoints, 0 to disable during training')
@@ -82,11 +81,11 @@ fid_cache: ./stats/cifar10.train.npz #help='FID cache')
 
 # Mode slurm
 slurm:
-  nodes: 2 # 2
+  nodes: 4 # 2
   gpus_per_node: 2  # max 2
   cpus_per_task: 10
   mem: 72 # in GiB 48
-  timeout: 48 # hours
+  timeout: 72 # hours
   partition: gpu
   qos: gpu
   account: vita # optional

@@ -4,7 +4,7 @@ import torch as th
 import torch.nn as nn
 import torch.nn.functional as F
 from abc import abstractmethod
-
+import time
 from ddpm.fp_16_utils import convert_module_to_f16, convert_module_to_f32
 from ddpm.ddib_utils import (
     checkpoint,
@@ -629,27 +629,42 @@ class UNetModel(nn.Module):
         :param y: an [N] Tensor of labels, if class-conditional.
         :return: an [N x C x ...] Tensor of outputs.
         """
+        time_begin = time.time()        
+        time_start = time.time()
         assert (y is not None) == (
                 self.num_classes is not None
         ), "must specify y if and only if the model is class-conditional"
 
         hs = []
+        
         emb = self.time_embed(timestep_embedding(timesteps, self.model_channels))
-
+        # print(f"Embedding takes {time.time()-time_start} seconds.")
+        time_start = time.time()
         if self.num_classes is not None:
             assert y.shape == (x.shape[0],)
             emb = emb + self.label_emb(y)
 
+       
         h = x.type(self.dtype)
         for module in self.input_blocks:
             h = module(h, emb)
             hs.append(h)
+        # print(f"input_blocks takes {time.time()-time_start} seconds.")
+
+        time_start = time.time()
         h = self.middle_block(h, emb)
+        # print(f"middle_block takes {time.time()-time_start} seconds.")
+
+        time_start = time.time()
         for module in self.output_blocks:
             h = th.cat([h, hs.pop()], dim=1)
             h = module(h, emb)
         h = h.type(x.dtype)
-        return self.out(h)
+        # print(f"output_blocks takes {time.time()-time_start} seconds.")
+        h = self.out(h)
+        a=0
+        # print(f"overall forward takes {time.time()-time_begin} seconds.")
+        return h
 
 
 class SuperResModel(UNetModel):
@@ -862,8 +877,9 @@ class EncoderUNetModel(nn.Module):
         :param timesteps: a 1-D batch of timesteps.
         :return: an [N x K] Tensor of outputs.
         """
+        time_start = time.time()
         emb = self.time_embed(timestep_embedding(timesteps, self.model_channels))
-
+        print(f"embedding takes {time.time()- time_start}")
         results = []
         h = x.type(self.dtype)
         for module in self.input_blocks:

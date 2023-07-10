@@ -8,7 +8,7 @@ import enum
 import math
 import numpy as np
 import torch as th
-
+import time
 from ddpm.ddib_utils import normal_kl, discretized_gaussian_log_likelihood, mean_flat
 
 
@@ -239,13 +239,21 @@ class GaussianDiffusion:
                  - 'log_variance': the log of 'variance'.
                  - 'pred_xstart': the prediction for x_0.
         """
+
+        a = 0
         if model_kwargs is None:
             model_kwargs = {}
 
         B, C = x.shape[:2]
         assert t.shape == (B,)
-        model_output = model(x, self._scale_timesteps(t), **model_kwargs)
-
+        time_begin = time.time()
+        time_start = time.time()
+        # model_output = model(x, self._scale_timesteps(t), **model_kwargs)
+        model_output = model(x, t, **model_kwargs)
+        # a = 0
+        # print(f"prediction {t[0]}, takes {time.time()-time_start} seconds.")
+        a += time.time()-time_start
+        time_start_2 = time.time()
         if self.model_var_type in [ModelVarType.LEARNED, ModelVarType.LEARNED_RANGE]:
             assert model_output.shape == (B, C * 2, *x.shape[2:])
             model_output, model_var_values = th.split(model_output, C, dim=1)
@@ -274,9 +282,14 @@ class GaussianDiffusion:
                     self.posterior_log_variance_clipped,
                 ),
             }[self.model_var_type]
+            
             model_variance = _extract_into_tensor(model_variance, t, x.shape)
             model_log_variance = _extract_into_tensor(model_log_variance, t, x.shape)
+        
+        a += time.time()-time_start_2
+        # print(f"Extraction takes {time.time()-time_start_2} seconds.")
 
+        time_start_3 = time.time()
         def process_xstart(x):
             if denoised_fn is not None:
                 x = denoised_fn(x)
@@ -284,6 +297,10 @@ class GaussianDiffusion:
                 return x.clamp(-1, 1)
             return x
 
+        # print(f"Function definition takes {time.time()-time_start_3} seconds.")
+        a += time.time()-time_start_3
+
+        time_start_4 = time.time()
         if self.model_mean_type == ModelMeanType.PREVIOUS_X:
             pred_xstart = process_xstart(
                 self._predict_xstart_from_xprev(x_t=x, t=t, xprev=model_output)
@@ -301,16 +318,21 @@ class GaussianDiffusion:
             )
         else:
             raise NotImplementedError(self.model_mean_type)
-
         assert (
                 model_mean.shape == model_log_variance.shape == pred_xstart.shape == x.shape
         )
-        return {
+        dico = {
             "mean": model_mean,
             "variance": model_variance,
             "log_variance": model_log_variance,
             "pred_xstart": pred_xstart,
         }
+
+        a += time.time()-time_start_4
+        # print(f"If loop takes {time.time()-time_start_4} seconds.")
+        # print(f"All commands take {time.time() - time_begin} seconds.")
+        # print(f"Overall sum takes {a} seconds")
+        return dico
 
     def _predict_xstart_from_eps(self, x_t, t, eps):
         assert x_t.shape == eps.shape
@@ -402,6 +424,7 @@ class GaussianDiffusion:
                  - 'sample': a random sample from the model.
                  - 'pred_xstart': a prediction of x_0.
         """
+        time_start = time.time()
         out = self.p_mean_variance(
             model,
             x,
@@ -410,6 +433,8 @@ class GaussianDiffusion:
             denoised_fn=denoised_fn,
             model_kwargs=model_kwargs,
         )
+        time_end = time.time()
+        # print(f"p_mean_variance {t[0]}, takes {time_end-time_start} seconds.")
         noise = th.randn_like(x)
         nonzero_mask = (
             (t != 0).float().view(-1, *([1] * (len(x.shape) - 1)))
@@ -492,6 +517,7 @@ class GaussianDiffusion:
             img = noise
         else:
             img = th.randn(*shape, device=device)
+        # print(shape)
         indices = list(range(self.num_timesteps))[::-1]
 
         if progress:
@@ -501,8 +527,10 @@ class GaussianDiffusion:
             indices = tqdm(indices)
 
         for i in indices:
+            time_start = time.time()
             t = th.tensor([i] * shape[0], device=device)
             with th.no_grad():
+                time_compute = time.time()
                 out = self.p_sample(
                     model,
                     img,
@@ -514,7 +542,10 @@ class GaussianDiffusion:
                 )
                 yield out
                 img = out["sample"]
-
+            time_end = time.time()
+            # print(f"P_sample {i} takes {time_end - time_start} seconds.")
+            # print(f"Iteration {i} takes {time_end - time_start} seconds.")
+        # yield out
     def ddim_sample(
             self,
             model,
@@ -794,7 +825,7 @@ class GaussianDiffusion:
         output = th.where((t == 0), decoder_nll, kl)
         return {"output": output, "pred_xstart": out["pred_xstart"]}
 
-    def training_losses(self, model, x_start, t, model_kwargs=None, noise=None):
+    def training_losses(self, model, x_start, t, model_kwargs=None, noise=None, clip_pred_for_training = True):
         """
         Compute training losses for a single timestep.
         :param model: the model to evaluate loss on.
@@ -827,7 +858,6 @@ class GaussianDiffusion:
                 terms["loss"] *= self.num_timesteps
         elif self.loss_type == LossType.MSE or self.loss_type == LossType.RESCALED_MSE:
             model_output = model(x_t, self._scale_timesteps(t), **model_kwargs)
-
             if self.model_var_type in [
                 ModelVarType.LEARNED,
                 ModelVarType.LEARNED_RANGE,
@@ -835,6 +865,8 @@ class GaussianDiffusion:
                 B, C = x_t.shape[:2]
                 assert model_output.shape == (B, C * 2, *x_t.shape[2:])
                 model_output, model_var_values = th.split(model_output, C, dim=1)
+                if clip_pred_for_training:
+                    model_output = th.clamp(model_output, min=-1., max=1.)
                 # Learn the variance using the variational bound, but don't let
                 # it affect our mean prediction.
                 frozen_out = th.cat([model_output.detach(), model_var_values], dim=1)
@@ -849,7 +881,9 @@ class GaussianDiffusion:
                     # Divide by 1000 for equivalence with initial implementation.
                     # Without a factor of 1/1000, the VB term hurts the MSE term.
                     terms["vb"] *= self.num_timesteps / 1000.0
-
+            else:
+                if clip_pred_for_training:
+                    model_output = th.clamp(model_output, min=-1., max=1.)
             target = {
                 ModelMeanType.PREVIOUS_X: self.q_posterior_mean_variance(
                     x_start=x_start, x_t=x_t, t=t

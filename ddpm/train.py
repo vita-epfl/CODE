@@ -20,7 +20,8 @@ def main(cfg: DictConfig) -> int:
     elif cfg.trainer.type == 'ddib':
         trainer = DDIB_Trainer(cfg)
     elif cfg.trainer.type == "cityscape" :
-        trainer = Cityscape_Trainer(cfg)
+        trainer = DDIB_Trainer(cfg)
+        # trainer = Cityscape_Trainer(cfg)
     else:
         raise NotImplementedError
 
