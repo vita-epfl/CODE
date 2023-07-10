@@ -227,6 +227,7 @@ class DDIB_Trainer(BaseTrainer):
     def train(self,) -> None:
         self.ddp_model.train()
         self.mp_trainer.zero_grad()
+        LOG.info(f"Sample step {self.cfg.trainer.sample_step}")
         for step in range(self.cfg.trainer.total_steps):
             self.ddp_model.train()
             self.mp_trainer.zero_grad()
@@ -234,6 +235,7 @@ class DDIB_Trainer(BaseTrainer):
             batch, _ = next(self.datalooper)
             batch = batch.cuda(self.cfg.trainer.gpu)
             number_of_accumulation = len(range(0, batch.shape[0], self.microbatch))
+            total_loss = 0
             for i in range(0, batch.shape[0], self.microbatch):
                 micro = batch[i: i + self.microbatch]
                 last_batch = (i + self.microbatch) >= batch.shape[0]
@@ -256,9 +258,10 @@ class DDIB_Trainer(BaseTrainer):
                     )
 
                 loss = (losses["loss"] * weights).mean() / number_of_accumulation
-                if self.writer is not None:
-                    # if (loss.detach().cpu().item() * number_of_accumulation * 100) < 2.5:
-                    self.writer.add_scalar('loss', loss.detach().cpu().item() * number_of_accumulation, step)
+                total_loss += loss.detach().cpu().item()
+                # if self.writer is not None:
+                #     # if (loss.detach().cpu().item() * number_of_accumulation * 100) < 2.5:
+                #     self.writer.add_scalar('loss', loss.detach().cpu().item() * number_of_accumulation, step)
                     # else:
                         # self.writer.add_scalar('weird_loss', loss.detach().cpu().item() * number_of_accumulation * 100, step)
 
@@ -268,24 +271,20 @@ class DDIB_Trainer(BaseTrainer):
             if took_step:
                 ema(self.net_model, self.ema_model, self.cfg.trainer.ema_decay)
             else: 
-                print(f"NaN at step {self.step}")
-            ### remove scheduler cf Meta
-            # if self.sched is not None:
-            #     self.sched.step()
-            # else:
-            #     self._anneal_lr()
-            if self.cfg.trainer.gpu == 0:
-                self.log(batch)
+                LOG.info(f"NaN at step {self.step}")
+
+            if self.writer is not None:
+                self.log(batch, total_loss)
             dist.barrier()
     # log
-    def log(self, batch):
+    def log(self, batch, total_loss):      
         if self.cfg.trainer.sample_step > 0 and self.step % self.cfg.trainer.sample_step == 0:                
             self.ddp_model.eval()
             self.ema_model.eval()
             if self.writer is not None:
                 grid_ori = make_grid(batch) 
                 img_grid_ori = wandb.Image(grid_ori.permute(1,2,0).cpu().numpy())
-                wandb.log({"Original_Image": img_grid_ori})
+                wandb.log({"Original_Image": img_grid_ori}, commit=False)
 
             if self.step > 0 :
                 with torch.no_grad():
@@ -298,11 +297,12 @@ class DDIB_Trainer(BaseTrainer):
                         self.cfg.trainer.logdir, 'sample', 'ddpm_%d.png' % self.step)
                     time_sampling = time.time() - time_start
                     if self.writer is not None:
+                        LOG.info("logging image")
                         self.writer.add_scalar('Sampling Time', time_sampling, self.step)
                         img_grid = wandb.Image(grid.permute(1,2,0).cpu().numpy())
-                        wandb.log({"Sample_DDPM": img_grid})
+                        wandb.log({"Sample_DDPM": img_grid},commit=False)
                         
-            if self.step >= 0 :
+            if self.step >= 0:
                 with torch.no_grad():
                     x_0_ddim = self.spaced_diffusion.ddim_sample_loop(self.ddp_model, shape = self.x_T.shape,noise=self.x_T,
                                                                 clip_denoised=True,
@@ -312,7 +312,7 @@ class DDIB_Trainer(BaseTrainer):
                         self.cfg.trainer.logdir, 'sample', 'ddim_%d.png' % self.step)
                     if self.writer is not None:
                         img_grid_ddim = wandb.Image(grid_ddim.permute(1,2,0).cpu().numpy())
-                        wandb.log({"Sample_DDIM": img_grid_ddim})
+                        wandb.log({"Sample_DDIM": img_grid_ddim}, commit=False)
 
                 with torch.no_grad():
                     x_0_ddim_noclip = self.spaced_diffusion.ddim_sample_loop(self.ddp_model, shape = self.x_T.shape,noise=self.x_T,
@@ -323,7 +323,7 @@ class DDIB_Trainer(BaseTrainer):
                         self.cfg.trainer.logdir, 'sample', 'ddim_%d.png' % self.step)
                     if self.writer is not None:
                         img_grid_ddim_noclip = wandb.Image(grid_ddim_noclip.permute(1,2,0).cpu().numpy())
-                        wandb.log({"Sample_DDIM_noclipping": img_grid_ddim_noclip})
+                        wandb.log({"Sample_DDIM_noclipping": img_grid_ddim_noclip},commit=False)
 
                 with torch.no_grad():
                     x_0_ddim_ema = self.spaced_diffusion.ddim_sample_loop(self.ema_model, shape = self.x_T.shape,noise=self.x_T,
@@ -334,7 +334,7 @@ class DDIB_Trainer(BaseTrainer):
                         self.cfg.trainer.logdir, 'sample', 'ddim_ema%d.png' % self.step)
                     if self.writer is not None:
                         img_grid_ddim_ema = wandb.Image(grid_ddim_ema.permute(1,2,0).cpu().numpy())
-                        wandb.log({"Sample_DDIM_EMA": img_grid_ddim_ema})
+                        wandb.log({"Sample_DDIM_EMA": img_grid_ddim_ema},commit=False)
 
                 with torch.no_grad():
                     x_0_ddim_ema_noclip = self.spaced_diffusion.ddim_sample_loop(self.ema_model, shape = self.x_T.shape,noise=self.x_T,
@@ -345,10 +345,11 @@ class DDIB_Trainer(BaseTrainer):
                         self.cfg.trainer.logdir, 'sample', 'ddim_ema%d.png' % self.step)
                     if self.writer is not None:
                         img_grid_ddim_ema_noclip = wandb.Image(grid_ddim_ema_noclip.permute(1,2,0).cpu().numpy())
-                        wandb.log({"Sample_DDIM_EMA_noclipping": img_grid_ddim_ema_noclip})
-            # self.net_model.train()
+                        wandb.log({"Sample_DDIM_EMA_noclipping": img_grid_ddim_ema_noclip},commit=False)
+
             self.ddp_model.train()
             self.ema_model.train()
+        wandb.log({"Loss": total_loss})
 
         # save
         if self.cfg.trainer.save_step > 0 and self.step % self.cfg.trainer.save_step == 0 and self.step > 0:

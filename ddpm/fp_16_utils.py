@@ -212,8 +212,8 @@ class MixedPrecisionTrainer:
     def _optimize_normal(self, opt: th.optim.Optimizer, writer = None):
         if writer is not None:
             grad_norm, param_norm = self._compute_norms()
-            wandb.log({"grad_norm": grad_norm})
-            wandb.log({"param_norm": param_norm})
+            wandb.log({"grad_norm": grad_norm}, commit = False)
+            wandb.log({"param_norm": param_norm}, commit = False)
         # logger.logkv_mean("grad_norm", grad_norm)
         # logger.logkv_mean("param_norm", param_norm)
         opt.step()
