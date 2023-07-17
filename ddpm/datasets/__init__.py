@@ -238,33 +238,37 @@ def get_dataset(args, cfg):
         if cfg.trainer.center_crop:
             if cfg.trainer.random_flip:
                 train_transform =  transforms.Compose(
-                    [   transforms.Resize(original_img_size),
+                    [   transforms.ToTensor(),
+                        transforms.Resize(original_img_size),
                         transforms.CenterCrop(image_size),
                         transforms.RandomHorizontalFlip(p=0.5),
-                        transforms.ToTensor(),
+                        
                     ]
                 )
             else:
                 train_transform =  transforms.Compose(
-                    [   transforms.Resize(original_img_size),
+                    [   transforms.ToTensor(),
+                        transforms.Resize(original_img_size),
                         transforms.CenterCrop(image_size),
-                        transforms.ToTensor(),
+                        
                     ]
                 )
         else:  
             if cfg.trainer.random_flip:
                 train_transform =  transforms.Compose(
-                    [   transforms.Resize(original_img_size),
+                    [   transforms.ToTensor(),
+                        transforms.Resize(original_img_size),
                         transforms.RandomCrop(image_size),
                         transforms.RandomHorizontalFlip(p=0.5),
-                        transforms.ToTensor(),
+                        
                     ]
                 )
             else:
                 train_transform =  transforms.Compose(
-                    [   transforms.Resize(original_img_size),
+                    [   transforms.ToTensor(),
+                        transforms.Resize(original_img_size),
                         transforms.RandomCrop(image_size),
-                        transforms.ToTensor(),
+                        
                     ]
                 )
 

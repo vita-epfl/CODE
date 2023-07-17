@@ -12,14 +12,15 @@ verbose: True
 datapath: /mnt/scitas/datasets/imagenet #help='dataset path if downloaded
 dataset: IMAGENET #help='dataset name')
 split: all
-corruption: [frost] #help=corruption type base on Imagenet-C
+corruption: [] #help=corruption type base on Imagenet-C
 corruption_severity: [5] #help='corruption severity level 1-5'
 random_flip: False #help='Whether to use random flip in training')
+open_ai_normalization: False
 
 #original_img_size [1052,1914]
 lower_image_size: 
-original_img_size: [256,256]
-img_size: 256 #help='image size')
+original_img_size: [64]
+img_size: 64 #help='image size')
 center_crop: True
 
 # UNet
@@ -48,18 +49,18 @@ schedule_sampler: "uniform" #"loss-second-moment" #"uniform"
 loss_type: RESCALED_MSE
 
 # Training
-lr: 1e-7 #help='target learning rate')
+lr: 1e-4 #help='target learning rate')
 grad_clip:  #help="gradient norm clipping")
 total_steps: 1000000 #help='total training steps')
-warmup:  #help='learning rate warmup')
-batch_size: 8 #help='batch size')
-microbatch: 1
+warmup: 0 #help='learning rate warmup')
+batch_size: 16 #help='batch size')
+microbatch: 8
 num_workers: 4 #help='workers of Dataloader')
 ema_decay: 0.9999 #help="ema decay rate")
 # ema_rate: 0.9999 #help="ema decay rate")
-weight_decay: 0.
+weight_decay: 0.01
 fp16_scale_growth: 1e-3
-use_fp16: True
+use_fp16: False
 # parallel: True #help='multi gpu training')
 # unique_img: False #help='Train a model on a single image.')
 
@@ -71,14 +72,14 @@ use_half_precision: False
 # Logging & Sampling
 logdir: /mnt/scitas/bastien/logs/${trainer.dataset} #help='log directory')
 wandb_entity: bastienvd #help='wandb id to use')
-sample_size: 4 #"sampling size of images")
+sample_size: 6 #"sampling size of images")
 sample_step: 1000 #help='frequency of sampling')
-ml_exp_name: Imagenet_Diffusion_cos_${trainer.corruption}_x${trainer.img_size} #help = 'name of the experience on wandb')
+ml_exp_name: Imagenet_Diffusion_${trainer.corruption}_x${trainer.img_size} #help = 'name of the experience on wandb')
 checkpointpath: #/mnt/scitas/bastien/logs/Audio/ckpt_350000.pt
-load_imagenet_256_ckpt: True
-imagenet_256_ckpt: /mnt/scitas/bastien/logs/ImageNet/256/256x256_diffusion_uncond.pt
+load_imagenet_256_ckpt: False
+imagenet_256_ckpt: /mnt/scitas/bastien/imagenet_diffusion/256x256_diffusion_uncond.pt
 timesteps_respacing: ddim50
-clip_denoised: True
+clip_denoised: False
 progress: False
 
 # Evaluation

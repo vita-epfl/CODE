@@ -7,6 +7,6 @@ samples
 stats
 data
 logs
-
+ddpm/config
 .python-version
 __pycache__

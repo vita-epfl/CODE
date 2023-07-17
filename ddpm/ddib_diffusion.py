@@ -246,14 +246,9 @@ class GaussianDiffusion:
 
         B, C = x.shape[:2]
         assert t.shape == (B,)
-        time_begin = time.time()
-        time_start = time.time()
-        # model_output = model(x, self._scale_timesteps(t), **model_kwargs)
+
         model_output = model(x, t, **model_kwargs)
-        # a = 0
-        # print(f"prediction {t[0]}, takes {time.time()-time_start} seconds.")
-        a += time.time()-time_start
-        time_start_2 = time.time()
+
         if self.model_var_type in [ModelVarType.LEARNED, ModelVarType.LEARNED_RANGE]:
             assert model_output.shape == (B, C * 2, *x.shape[2:])
             model_output, model_var_values = th.split(model_output, C, dim=1)
@@ -286,21 +281,13 @@ class GaussianDiffusion:
             model_variance = _extract_into_tensor(model_variance, t, x.shape)
             model_log_variance = _extract_into_tensor(model_log_variance, t, x.shape)
         
-        a += time.time()-time_start_2
-        # print(f"Extraction takes {time.time()-time_start_2} seconds.")
-
-        time_start_3 = time.time()
         def process_xstart(x):
             if denoised_fn is not None:
                 x = denoised_fn(x)
             if clip_denoised:
                 return x.clamp(-1, 1)
             return x
-
-        # print(f"Function definition takes {time.time()-time_start_3} seconds.")
-        a += time.time()-time_start_3
-
-        time_start_4 = time.time()
+   
         if self.model_mean_type == ModelMeanType.PREVIOUS_X:
             pred_xstart = process_xstart(
                 self._predict_xstart_from_xprev(x_t=x, t=t, xprev=model_output)
@@ -328,10 +315,6 @@ class GaussianDiffusion:
             "pred_xstart": pred_xstart,
         }
 
-        a += time.time()-time_start_4
-        # print(f"If loop takes {time.time()-time_start_4} seconds.")
-        # print(f"All commands take {time.time() - time_begin} seconds.")
-        # print(f"Overall sum takes {a} seconds")
         return dico
 
     def _predict_xstart_from_eps(self, x_t, t, eps):
@@ -424,7 +407,7 @@ class GaussianDiffusion:
                  - 'sample': a random sample from the model.
                  - 'pred_xstart': a prediction of x_0.
         """
-        time_start = time.time()
+        
         out = self.p_mean_variance(
             model,
             x,
@@ -433,8 +416,7 @@ class GaussianDiffusion:
             denoised_fn=denoised_fn,
             model_kwargs=model_kwargs,
         )
-        time_end = time.time()
-        # print(f"p_mean_variance {t[0]}, takes {time_end-time_start} seconds.")
+
         noise = th.randn_like(x)
         nonzero_mask = (
             (t != 0).float().view(-1, *([1] * (len(x.shape) - 1)))
@@ -517,7 +499,6 @@ class GaussianDiffusion:
             img = noise
         else:
             img = th.randn(*shape, device=device)
-        # print(shape)
         indices = list(range(self.num_timesteps))[::-1]
 
         if progress:
@@ -527,10 +508,8 @@ class GaussianDiffusion:
             indices = tqdm(indices)
 
         for i in indices:
-            time_start = time.time()
             t = th.tensor([i] * shape[0], device=device)
             with th.no_grad():
-                time_compute = time.time()
                 out = self.p_sample(
                     model,
                     img,
@@ -542,10 +521,7 @@ class GaussianDiffusion:
                 )
                 yield out
                 img = out["sample"]
-            time_end = time.time()
-            # print(f"P_sample {i} takes {time_end - time_start} seconds.")
-            # print(f"Iteration {i} takes {time_end - time_start} seconds.")
-        # yield out
+
     def ddim_sample(
             self,
             model,
@@ -710,6 +686,7 @@ class GaussianDiffusion:
                       _extract_into_tensor(self.sqrt_recip_alphas_cumprod, t, x.shape) * x
                       - out["pred_xstart"]
               ) / _extract_into_tensor(self.sqrt_recipm1_alphas_cumprod, t, x.shape)
+
         alpha_bar_next = _extract_into_tensor(self.alphas_cumprod_next, t, x.shape)
 
         # Equation 12. reversed

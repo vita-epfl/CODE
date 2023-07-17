@@ -273,8 +273,7 @@ class DDIB_Trainer(BaseTrainer):
             else: 
                 LOG.info(f"NaN at step {self.step}")
 
-            if self.writer is not None:
-                self.log(batch, total_loss)
+            self.log(batch, total_loss)
             dist.barrier()
     # log
     def log(self, batch, total_loss):      
@@ -349,7 +348,8 @@ class DDIB_Trainer(BaseTrainer):
 
             self.ddp_model.train()
             self.ema_model.train()
-        wandb.log({"Loss": total_loss})
+        if self.writer is not None:
+            wandb.log({"Loss": total_loss})
 
         # save
         if self.cfg.trainer.save_step > 0 and self.step % self.cfg.trainer.save_step == 0 and self.step > 0:
