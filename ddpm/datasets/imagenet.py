@@ -21,7 +21,7 @@ class Imagenet_Dataset(VisionDataset):
                             corruption: Optional[List[str]] = None, 
                             corruption_severity: Optional[List[int]] = None,
                             transform: Optional[Callable] = None,
-                            open_ai_normalization: bool = False
+                            open_ai_normalization: bool = False,
                             inv_transform: Optional[Callable] = None):
         self.cfg = cfg
         self.open_ai_normalization = open_ai_normalization or self.cfg.trainer.open_ai_normalization
