@@ -1,6 +1,7 @@
 import os
 import torch
 import numbers
+from omegaconf import OmegaConf
 import torchvision.transforms as transforms
 import torchvision.transforms.functional as F
 from torchvision.datasets import CIFAR10
@@ -41,7 +42,7 @@ def get_dataset(args, cfg):
     random_flip = args.random_flip
     lower_image_size = args.lower_image_size
     image_size = args.img_size
-    original_img_size = args.original_img_size
+    original_img_size = OmegaConf.to_object(args.original_img_size)
     if random_flip is False:
         train_transform = test_transform = transforms.Compose(
             [transforms.Resize(image_size), transforms.ToTensor()]
