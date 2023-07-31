@@ -24,7 +24,7 @@ class Imagenet_Dataset(VisionDataset):
                             open_ai_normalization: bool = False,
                             inv_transform: Optional[Callable] = None):
         self.cfg = cfg
-        self.open_ai_normalization = open_ai_normalization or self.cfg.trainer.open_ai_normalization
+        self.open_ai_normalization = self.cfg.trainer.open_ai_normalization
         # self.lower_image_size = OmegaConf.to_object(self.cfg.trainer.lower_image_size)
         # self.img_size = OmegaConf.to_object(self.cfg.trainer.img_size)
 
@@ -74,11 +74,12 @@ class Imagenet_Dataset(VisionDataset):
                                 self.images.append(os.path.join(img_subdir, file_name))
                             
             else:
-                self.images_dir = os.path.join(self.root, split)
+                self.images_dir = os.path.join(self.root, self.split)
                 for subdir in os.listdir(self.images_dir):
                     img_subdir = os.path.join(self.images_dir, subdir)
-                    for file_name in os.listdir(img_subdir):
-                        self.images.append(os.path.join(img_subdir, file_name))
+                    if os.path.isdir(img_subdir):
+                        for file_name in os.listdir(img_subdir):
+                            self.images.append(os.path.join(img_subdir, file_name))
         else:
             self.original_image_dir = os.path.join(self.root,'val')
             self.image_c_dir = os.path.join(self.root, "imagenet-c")

@@ -621,7 +621,7 @@ class UNetModel(nn.Module):
         self.middle_block.apply(convert_module_to_f32)
         self.output_blocks.apply(convert_module_to_f32)
 
-    def forward(self, x, timesteps, y=None):
+    def forward(self, x, timesteps, y=None, return_attention = True):
         """
         Apply the model to an input batch.
         :param x: an [N x C x ...] Tensor of inputs.
@@ -629,8 +629,6 @@ class UNetModel(nn.Module):
         :param y: an [N] Tensor of labels, if class-conditional.
         :return: an [N x C x ...] Tensor of outputs.
         """
-        time_begin = time.time()        
-        time_start = time.time()
         assert (y is not None) == (
                 self.num_classes is not None
         ), "must specify y if and only if the model is class-conditional"
@@ -638,8 +636,7 @@ class UNetModel(nn.Module):
         hs = []
         
         emb = self.time_embed(timestep_embedding(timesteps, self.model_channels))
-        # print(f"Embedding takes {time.time()-time_start} seconds.")
-        time_start = time.time()
+
         if self.num_classes is not None:
             assert y.shape == (x.shape[0],)
             emb = emb + self.label_emb(y)
@@ -647,23 +644,24 @@ class UNetModel(nn.Module):
        
         h = x.type(self.dtype)
         for module in self.input_blocks:
-            h = module(h, emb)
+            if isinstance(module, AttentionBlock) or isinstance(module, TimestepEmbedSequential) and return_attention:
+                h = module(h, emb)
+            else:
+                h = module(h, emb)
             hs.append(h)
-        # print(f"input_blocks takes {time.time()-time_start} seconds.")
 
-        time_start = time.time()
         h = self.middle_block(h, emb)
-        # print(f"middle_block takes {time.time()-time_start} seconds.")
 
-        time_start = time.time()
+
         for module in self.output_blocks:
             h = th.cat([h, hs.pop()], dim=1)
-            h = module(h, emb)
+            if isinstance(module, AttentionBlock) or isinstance(module, TimestepEmbedSequential) and return_attention:
+                h = module(h, emb)
+            else:
+                h = module(h, emb)
+
         h = h.type(x.dtype)
-        # print(f"output_blocks takes {time.time()-time_start} seconds.")
         h = self.out(h)
-        a=0
-        # print(f"overall forward takes {time.time()-time_begin} seconds.")
         return h
 
 
@@ -877,9 +875,8 @@ class EncoderUNetModel(nn.Module):
         :param timesteps: a 1-D batch of timesteps.
         :return: an [N x K] Tensor of outputs.
         """
-        time_start = time.time()
         emb = self.time_embed(timestep_embedding(timesteps, self.model_channels))
-        print(f"embedding takes {time.time()- time_start}")
+
         results = []
         h = x.type(self.dtype)
         for module in self.input_blocks:

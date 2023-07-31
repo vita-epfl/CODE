@@ -25,15 +25,15 @@ def main(cfg: DictConfig) -> int:
     else:
         raise NotImplementedError
 
+    with open_dict(cfg):
+        cfg.trainer.logdir = str(get_output_dir(cfg, cfg.trainer.sync_key))
+
     if cfg.trainer.platform == "local":
         LOG.info(f"Output directory {cfg.trainer.logdir}/{cfg.trainer.sync_key}")
         trainer.setup_platform()
         trainer.setup_trainer()
         trainer.run()
         return 0
-
-    with open_dict(cfg):
-        cfg.trainer.logdir = str(get_output_dir(cfg, cfg.trainer.sync_key))
 
     # Mode SLURM
     executor = submitit.AutoExecutor(folder=cfg.trainer.logdir, slurm_max_num_timeout=30)

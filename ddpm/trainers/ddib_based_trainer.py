@@ -259,11 +259,6 @@ class DDIB_Trainer(BaseTrainer):
 
                 loss = (losses["loss"] * weights).mean() / number_of_accumulation
                 total_loss += loss.detach().cpu().item()
-                # if self.writer is not None:
-                #     # if (loss.detach().cpu().item() * number_of_accumulation * 100) < 2.5:
-                #     self.writer.add_scalar('loss', loss.detach().cpu().item() * number_of_accumulation, step)
-                    # else:
-                        # self.writer.add_scalar('weird_loss', loss.detach().cpu().item() * number_of_accumulation * 100, step)
 
                 self.mp_trainer.backward(loss)
             took_step = self.mp_trainer.optimize(self.optimizer, writer=self.writer)
@@ -304,7 +299,7 @@ class DDIB_Trainer(BaseTrainer):
             if self.step >= 0:
                 with torch.no_grad():
                     x_0_ddim = self.spaced_diffusion.ddim_sample_loop(self.ddp_model, shape = self.x_T.shape,noise=self.x_T,
-                                                                clip_denoised=True,
+                                                                clip_denoised=False,
                                                                 progress = self.cfg.trainer.progress)
                     grid_ddim = make_grid(x_0_ddim)
                     path = os.path.join(
@@ -314,16 +309,24 @@ class DDIB_Trainer(BaseTrainer):
                         wandb.log({"Sample_DDIM": img_grid_ddim}, commit=False)
 
                 with torch.no_grad():
-                    x_0_ddim_noclip = self.spaced_diffusion.ddim_sample_loop(self.ddp_model, shape = self.x_T.shape,noise=self.x_T,
+                    x_0_ddim_reverse = self.spaced_diffusion.ddim_reverse_sample_loop(self.ddp_model, image = x_0_ddim,
                                                                 clip_denoised=False,
                                                                 progress = self.cfg.trainer.progress)
-                    grid_ddim_noclip = make_grid(x_0_ddim_noclip)
-                    path = os.path.join(
-                        self.cfg.trainer.logdir, 'sample', 'ddim_%d.png' % self.step)
-                    if self.writer is not None:
-                        img_grid_ddim_noclip = wandb.Image(grid_ddim_noclip.permute(1,2,0).cpu().numpy())
-                        wandb.log({"Sample_DDIM_noclipping": img_grid_ddim_noclip},commit=False)
+                    reconstruction_error_latent = torch.mean((self.x_T - x_0_ddim_reverse)**2)
 
+                    x_0_ddim_reconstruct = self.spaced_diffusion.ddim_sample_loop(self.ddp_model, shape = self.x_T.shape,
+                                                                noise=x_0_ddim_reverse,
+                                                                clip_denoised=False,
+                                                                progress = self.cfg.trainer.progress)
+                    reconstruction_error = torch.mean((x_0_ddim- x_0_ddim_reconstruct)**2)
+                    grid_reverse = make_grid(x_0_ddim_reconstruct)                           
+                    if self.writer is not None:
+                        # img_grid_ddim_noclip = wandb.Image(grid_ddim_noclip.permute(1,2,0).cpu().numpy())
+                        wandb.log({"Reconstruction_error_latent": reconstruction_error_latent.cpu().item()},commit=False)
+                        wandb.log({"Reconstruction_error": reconstruction_error.cpu().item()},commit=False)
+                        img_grid_ddim_reconstruction = wandb.Image(grid_reverse.permute(1,2,0).cpu().numpy())
+                        wandb.log({"Reconstruction Sample": img_grid_ddim_reconstruction},commit=False)
+                        
                 with torch.no_grad():
                     x_0_ddim_ema = self.spaced_diffusion.ddim_sample_loop(self.ema_model, shape = self.x_T.shape,noise=self.x_T,
                                                                 clip_denoised=True,
@@ -335,16 +338,16 @@ class DDIB_Trainer(BaseTrainer):
                         img_grid_ddim_ema = wandb.Image(grid_ddim_ema.permute(1,2,0).cpu().numpy())
                         wandb.log({"Sample_DDIM_EMA": img_grid_ddim_ema},commit=False)
 
-                with torch.no_grad():
-                    x_0_ddim_ema_noclip = self.spaced_diffusion.ddim_sample_loop(self.ema_model, shape = self.x_T.shape,noise=self.x_T,
-                                                                clip_denoised=False,
-                                                                progress = self.cfg.trainer.progress)
-                    grid_ddim_ema_noclip = make_grid(x_0_ddim_ema_noclip)
-                    path = os.path.join(
-                        self.cfg.trainer.logdir, 'sample', 'ddim_ema%d.png' % self.step)
-                    if self.writer is not None:
-                        img_grid_ddim_ema_noclip = wandb.Image(grid_ddim_ema_noclip.permute(1,2,0).cpu().numpy())
-                        wandb.log({"Sample_DDIM_EMA_noclipping": img_grid_ddim_ema_noclip},commit=False)
+                # with torch.no_grad():
+                #     x_0_ddim_ema_noclip = self.spaced_diffusion.ddim_sample_loop(self.ema_model, shape = self.x_T.shape,noise=self.x_T,
+                #                                                 clip_denoised=False,
+                #                                                 progress = self.cfg.trainer.progress)
+                #     grid_ddim_ema_noclip = make_grid(x_0_ddim_ema_noclip)
+                #     path = os.path.join(
+                #         self.cfg.trainer.logdir, 'sample', 'ddim_ema%d.png' % self.step)
+                #     if self.writer is not None:
+                #         img_grid_ddim_ema_noclip = wandb.Image(grid_ddim_ema_noclip.permute(1,2,0).cpu().numpy())
+                #         wandb.log({"Sample_DDIM_EMA_noclipping": img_grid_ddim_ema_noclip},commit=False)
 
             self.ddp_model.train()
             self.ema_model.train()
@@ -361,7 +364,9 @@ class DDIB_Trainer(BaseTrainer):
                 'step': self.step,
                 "config": OmegaConf.to_container(self.cfg)
             }
+
             torch.save(ckpt, os.path.join(self.cfg.trainer.logdir, f'ckpt_{self.step}.pt'))
+            # torch.save(ckpt, os.path.join(directory, f'ckpt_{self.step}.pt'))
 
 
     def create_diffusion(self,):
