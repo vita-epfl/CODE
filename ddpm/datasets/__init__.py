@@ -13,6 +13,8 @@ from ddpm.datasets.audio import AudioDataset
 from ddpm.datasets.gta5 import GTA_Pretraining_Dataset
 from ddpm.datasets.imagenet import Imagenet_Dataset
 from torch.utils.data import Subset
+import copy
+from omegaconf import DictConfig, open_dict
 import numpy as np
 
 
@@ -274,7 +276,10 @@ def get_dataset(args, cfg):
                 )
 
         dataset = Imagenet_Dataset(cfg, transform = train_transform)
-        test_dataset = None
+        test_cfg = copy.deepcopy(cfg)
+        with open_dict(test_cfg):
+            test_cfg.trainer.split = "val"
+        test_dataset = Imagenet_Dataset(test_cfg, transform = train_transform)
     elif dataset_name == "LSUN":
         train_folder = "{}_train".format(config.data.category)
         val_folder = "{}_val".format(config.data.category)

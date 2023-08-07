@@ -197,9 +197,11 @@ class DDIB_Trainer(BaseTrainer):
                     world_size=self.cfg.trainer.world_size,
                     batch_size=self.cfg.trainer.batch_size,
                 )
+            
         else:
             self.test_dataloader = self.train_dataloader
             self.test_dataset = self.train_dataset
+        self.test_datalooper = infiniteloop(self.test_dataloader)
 
         self.steps_in_one_epoch = len(self.train_dataset) // self.total_batch
         LOG.info(f"Number of step per epoch: {self.steps_in_one_epoch}")
@@ -271,16 +273,24 @@ class DDIB_Trainer(BaseTrainer):
             self.log(batch, total_loss)
             dist.barrier()
     # log
-    def log(self, batch, total_loss):      
+    def log(self, batch, total_loss):    
+        test_batch , _ = next(self.test_datalooper) 
+        test_subbatch = test_batch[:self.x_T.shape[0]]
+        test_subbatch = test_subbatch.cuda(self.cfg.trainer.gpu)
+        subbatch = batch[:self.x_T.shape[0]]
         if self.cfg.trainer.sample_step > 0 and self.step % self.cfg.trainer.sample_step == 0:                
             self.ddp_model.eval()
             self.ema_model.eval()
             if self.writer is not None:
-                grid_ori = make_grid(batch) 
+                grid_ori = make_grid(subbatch) 
                 img_grid_ori = wandb.Image(grid_ori.permute(1,2,0).cpu().numpy())
                 wandb.log({"Original_Image": img_grid_ori}, commit=False)
-
+                grid_test = make_grid(test_subbatch) 
+                img_grid_test = wandb.Image(grid_test.permute(1,2,0).cpu().numpy())
+                wandb.log({"Test_Image": img_grid_test}, commit=False)
+            
             if self.step > 0 :
+                
                 with torch.no_grad():
                     time_start = time.time()
                     x_0 = self.diffusion.p_sample_loop(self.ddp_model, shape = self.x_T.shape,noise=self.x_T,
@@ -307,25 +317,62 @@ class DDIB_Trainer(BaseTrainer):
                     if self.writer is not None:
                         img_grid_ddim = wandb.Image(grid_ddim.permute(1,2,0).cpu().numpy())
                         wandb.log({"Sample_DDIM": img_grid_ddim}, commit=False)
-
+                
+                #Inversion
                 with torch.no_grad():
                     x_0_ddim_reverse = self.spaced_diffusion.ddim_reverse_sample_loop(self.ddp_model, image = x_0_ddim,
-                                                                clip_denoised=False,
+                                                                clip_denoised=True,
                                                                 progress = self.cfg.trainer.progress)
+                    x_0_ddim_reverse_batch = self.spaced_diffusion.ddim_reverse_sample_loop(self.ddp_model, image = subbatch,
+                                                                clip_denoised=True,
+                                                                progress = self.cfg.trainer.progress)
+
+                    x_0_ddim_reverse_test_batch = self.spaced_diffusion.ddim_reverse_sample_loop(self.ddp_model, image = test_subbatch,
+                                                                clip_denoised=True,
+                                                                progress = self.cfg.trainer.progress)
+
+                    # reconstruction_error_latent_batch = torch.mean((subbatch - x_0_ddim_reverse_batch)**2)                                   
                     reconstruction_error_latent = torch.mean((self.x_T - x_0_ddim_reverse)**2)
 
                     x_0_ddim_reconstruct = self.spaced_diffusion.ddim_sample_loop(self.ddp_model, shape = self.x_T.shape,
                                                                 noise=x_0_ddim_reverse,
-                                                                clip_denoised=False,
+                                                                clip_denoised=True,
                                                                 progress = self.cfg.trainer.progress)
+    
+                    x_0_ddim_reconstruct_batch = self.spaced_diffusion.ddim_sample_loop(self.ddp_model, shape = self.x_T.shape,
+                                                                noise=x_0_ddim_reverse_batch,
+                                                                clip_denoised=True,
+                                                                progress = self.cfg.trainer.progress)
+                    
+                    x_0_ddim_reconstruct_test_batch = self.spaced_diffusion.ddim_sample_loop(self.ddp_model, shape = self.x_T.shape,
+                                                                noise=x_0_ddim_reverse_test_batch,
+                                                                clip_denoised=True,
+                                                                progress = self.cfg.trainer.progress)
+
+
                     reconstruction_error = torch.mean((x_0_ddim- x_0_ddim_reconstruct)**2)
-                    grid_reverse = make_grid(x_0_ddim_reconstruct)                           
+                    reconstruction_error_batch = torch.mean((subbatch- x_0_ddim_reconstruct_batch)**2)
+                    reconstruction_error_test_batch = torch.mean((test_subbatch- x_0_ddim_reconstruct_test_batch)**2)
+                    grid_reverse = make_grid(x_0_ddim_reconstruct)
+                    grid_reverse_original = make_grid(x_0_ddim_reconstruct_batch)
+                    grid_reverse_test= make_grid(x_0_ddim_reconstruct_test_batch)
+
+                    #### Test Inversion
+
                     if self.writer is not None:
                         # img_grid_ddim_noclip = wandb.Image(grid_ddim_noclip.permute(1,2,0).cpu().numpy())
-                        wandb.log({"Reconstruction_error_latent": reconstruction_error_latent.cpu().item()},commit=False)
-                        wandb.log({"Reconstruction_error": reconstruction_error.cpu().item()},commit=False)
+                        wandb.log({"Reconstruction_error_latent_Sampled": reconstruction_error_latent.cpu().item()},commit=False)
+                        wandb.log({"Reconstruction_error_Sampled": reconstruction_error.cpu().item()},commit=False)
+                        # wandb.log({"Reconstruction_error_latent_Real": reconstruction_error_latent_batch.cpu().item()},commit=False)
+                        wandb.log({"Reconstruction_error_Real": reconstruction_error_batch.cpu().item()},commit=False)
+                        wandb.log({"Reconstruction_error_Real_Test": reconstruction_error_test_batch.cpu().item()},commit=False)
+
                         img_grid_ddim_reconstruction = wandb.Image(grid_reverse.permute(1,2,0).cpu().numpy())
                         wandb.log({"Reconstruction Sample": img_grid_ddim_reconstruction},commit=False)
+                        img_grid_ddim_reconstruction_batch = wandb.Image(grid_reverse_original.permute(1,2,0).cpu().numpy())
+                        wandb.log({"Reconstruction Real": img_grid_ddim_reconstruction_batch},commit=False)
+                        img_grid_ddim_reconstruction_test_batch = wandb.Image(grid_reverse_test.permute(1,2,0).cpu().numpy())
+                        wandb.log({"Reconstruction Test": img_grid_ddim_reconstruction_test_batch},commit=False)
                         
                 with torch.no_grad():
                     x_0_ddim_ema = self.spaced_diffusion.ddim_sample_loop(self.ema_model, shape = self.x_T.shape,noise=self.x_T,
@@ -457,7 +504,7 @@ class DDIB_Trainer(BaseTrainer):
             else:
                 raise ValueError(f"unsupported image size: {self.image_size}")
         else:
-            channel_mult = tuple(int(ch_mult) for ch_mult in channel_mult.split(","))
+            self.channel_mult = tuple(int(ch_mult) for ch_mult in self.channel_mult.split(","))
 
         attention_ds = []
         for res in self.cfg.trainer.attention_resolutions.split(","):
