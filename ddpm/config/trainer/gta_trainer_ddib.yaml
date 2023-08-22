@@ -24,7 +24,7 @@ img_size: 128 #help='image size')
 # UNet
 input_channel: 3
 kernel_size: 3
-ch: 128  #help='base channel of UNet')
+ch: 256  #help='base channel of UNet')
 ch_mult:  #help='channel multiplier')
 attention_resolutions: "32,16,8"
 # attn: [3,4,5] #help='add attention to these levels')
@@ -32,17 +32,14 @@ num_res_blocks: 3 #help='# resblock in each level')
 dropout: 0. #help='dropout rate of resblock')
 num_heads: 4
 num_head_channels: -1
-resblock_updown: True
-use_scale_shift_norm: True
+resblock_updown: False
+use_scale_shift_norm: False
 
 # Gaussian Diffusion
 beta_schedule: "linear"
 num_timesteps: 1000 #help='total diffusion steps')
-# beta_1: 1e-4 #help='start beta value')
-# beta_T: 0.02 #help='end beta value')
-#T: 1000 #help='total diffusion steps')
 mean_type: EPSILON #['PREVIOUS_X', 'START_X', 'EPSILON'], help='predict variable')
-var_type: FIXED_LARGE #['FIXED_LARGE', 'FIXED_SMALL', LEARNED_RANGE, LEARNED], help='variance type')
+var_type: LEARNED_RANGE #['FIXED_LARGE', 'FIXED_SMALL', LEARNED_RANGE, LEARNED], help='variance type')
 schedule_sampler: "uniform"
 loss_type: RESCALED_MSE
 
@@ -51,7 +48,7 @@ lr: 1e-4 #help='target learning rate')
 grad_clip: #help="gradient norm clipping")
 total_steps: 1000000 #help='total training steps')
 warmup: 0 #help='learning rate warmup')
-batch_size: 32 #help='batch size')
+batch_size: 16 #help='batch size')
 microbatch: 2
 num_workers: 4 #help='workers of Dataloader')
 ema_decay: 0.999 #help="ema decay rate")

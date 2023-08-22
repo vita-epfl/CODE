@@ -1,6 +1,7 @@
 import torch
 import os
 import PIL
+from PIL import ImageEnhance
 from .corruptions import *
 from .vision import VisionDataset
 from .utils import download_file_from_google_drive, check_integrity
@@ -153,7 +154,10 @@ class CelebA(VisionDataset):
         target = tuple(target) if len(target) > 1 else target[0]
 
         if self.corruption is not None:
-            if self.corruption == 'gaussian_blur':
+            if self.corruption == "black_and_white":
+                filter = ImageEnhance.Color(X)
+                X = filter.enhance(0)
+            elif self.corruption == 'gaussian_blur':
                 X = PIL.Image.fromarray(gaussian_blur(X, severity  = self.corruption_severity).astype(np.uint8))
             elif self.corruption == "glass_blur":
                 X = PIL.Image.fromarray(glass_blur(X, severity  = self.corruption_severity).astype(np.uint8))

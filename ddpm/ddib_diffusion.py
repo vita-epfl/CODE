@@ -240,14 +240,13 @@ class GaussianDiffusion:
                  - 'pred_xstart': the prediction for x_0.
         """
 
-        a = 0
         if model_kwargs is None:
             model_kwargs = {}
 
         B, C = x.shape[:2]
         assert t.shape == (B,)
-        attention_maps = []
-        model_output = model(x, t, **model_kwargs)
+        attn_maps = []
+        model_output, attn_maps = model(x, t, **model_kwargs)
 
         if self.model_var_type in [ModelVarType.LEARNED, ModelVarType.LEARNED_RANGE]:
             assert model_output.shape == (B, C * 2, *x.shape[2:])
@@ -313,7 +312,7 @@ class GaussianDiffusion:
             "variance": model_variance,
             "log_variance": model_log_variance,
             "pred_xstart": pred_xstart,
-            "attention_maps": [],
+            "attention_maps": attn_maps,
         }
 
         return dico
@@ -572,6 +571,86 @@ class GaussianDiffusion:
         sample = mean_pred + nonzero_mask * sigma * noise
         return {"sample": sample, "pred_xstart": out["pred_xstart"], "attention_maps":out["attention_maps"]}
 
+    def ddim_sample_with_langevin(
+            self,
+            model,
+            x,
+            t,
+            clip_denoised=True,
+            denoised_fn=None,
+            cond_fn=None,
+            model_kwargs=None,
+            eta=0.0,
+            epsilon = 0.01,
+            K = 5,
+    ):
+        """
+        Sample x_{t-1} from the model using DDIM.
+        Same usage as p_sample().
+        """
+        if self.model_var_type in [ModelVarType.FIXED_LARGE,ModelVarType.FIXED_SMALL]:
+            model_variance, model_log_variance = {
+                # for fixedlarge, we set the initial (log-)variance like so
+                # to get a better decoder log likelihood.
+                ModelVarType.FIXED_LARGE: (
+                    np.append(self.posterior_variance[1], self.betas[1:]),
+                    np.log(np.append(self.posterior_variance[1], self.betas[1:])),
+                ),
+                ModelVarType.FIXED_SMALL: (
+                    self.posterior_variance,
+                    self.posterior_log_variance_clipped,
+                ),
+            }[self.model_var_type]
+                
+            model_variance = _extract_into_tensor(model_variance, t, x.shape)
+            model_log_variance = _extract_into_tensor(model_log_variance, t, x.shape)
+        else: 
+            raise NotImplementedError
+
+        with th.no_grad():
+            for i in range(K):
+                if model_kwargs is None:
+                    model_kwargs = {}
+                
+                model_output, attn_maps = model(x, t, **model_kwargs)
+                x = x - epsilon * model_output / (2*th.clamp(th.sqrt(model_variance),0.001,1))
+                if i < K-1:
+                    x = x +  np.sqrt(epsilon) * th.randn_like(x) #* th.sqrt(model_variance)
+                
+        out = self.p_mean_variance(
+            model,
+            x,
+            t,
+            clip_denoised=clip_denoised,
+            denoised_fn=denoised_fn,
+            model_kwargs=model_kwargs,
+        )
+        if cond_fn is not None:
+            out = self.condition_score(cond_fn, out, x, t, model_kwargs=model_kwargs)
+
+        # Usually our model outputs epsilon, but we re-derive it
+        # in case we used x_start or x_prev prediction.
+        eps = self._predict_eps_from_xstart(x, t, out["pred_xstart"])
+
+        alpha_bar = _extract_into_tensor(self.alphas_cumprod, t, x.shape)
+        alpha_bar_prev = _extract_into_tensor(self.alphas_cumprod_prev, t, x.shape)
+        sigma = (
+                eta
+                * th.sqrt((1 - alpha_bar_prev) / (1 - alpha_bar))
+                * th.sqrt(1 - alpha_bar / alpha_bar_prev)
+        )
+        # Equation 12.
+        noise = th.randn_like(x)
+        mean_pred = (
+                out["pred_xstart"] * th.sqrt(alpha_bar_prev)
+                + th.sqrt(1 - alpha_bar_prev - sigma ** 2) * eps
+        )
+        nonzero_mask = (
+            (t != 0).float().view(-1, *([1] * (len(x.shape) - 1)))
+        )  # no noise when t == 0
+        sample = mean_pred + nonzero_mask * sigma * noise
+        return {"sample": sample, "pred_xstart": out["pred_xstart"], "attention_maps":out["attention_maps"]}
+
     def ddim_sample_loop(
             self,
             model,
@@ -617,6 +696,9 @@ class GaussianDiffusion:
             device=None,
             progress=False,
             eta=0.0,
+            langevin = False,            
+            epsilon = 0.01,
+            K = 5,
     ):
         """
         Use DDIM to sample from the model and yield intermediate samples from
@@ -641,7 +723,21 @@ class GaussianDiffusion:
         for i in indices:
             t = th.tensor([i] * shape[0], device=device)
             with th.no_grad():
-                out = self.ddim_sample(
+                if langevin:
+                    out = self.ddim_sample_with_langevin(
+                    model,
+                    img,
+                    t,
+                    clip_denoised=clip_denoised,
+                    denoised_fn=denoised_fn,
+                    cond_fn=cond_fn,
+                    model_kwargs=model_kwargs,
+                    eta=eta,
+                    epsilon=epsilon,
+                    K=K
+                )   
+                else:
+                    out = self.ddim_sample(
                     model,
                     img,
                     t,
@@ -835,8 +931,8 @@ class GaussianDiffusion:
             if self.loss_type == LossType.RESCALED_KL:
                 terms["loss"] *= self.num_timesteps
         elif self.loss_type == LossType.MSE or self.loss_type == LossType.RESCALED_MSE:
-            model_output = model(x_t, self._scale_timesteps(t), **model_kwargs)
-            terms["attention_maps"] = []
+            model_output, attn_maps = model(x_t, self._scale_timesteps(t), **model_kwargs)
+            terms["attention_maps"] = attn_maps
             if self.model_var_type in [
                 ModelVarType.LEARNED,
                 ModelVarType.LEARNED_RANGE,

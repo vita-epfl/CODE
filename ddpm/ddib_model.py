@@ -68,11 +68,19 @@ class TimestepEmbedSequential(nn.Sequential, TimestepBlock):
     """
 
     def forward(self, x, emb):
+        # attention_maps = []
         for layer in self:
             if isinstance(layer, TimestepBlock):
                 x = layer(x, emb)
+            # elif isinstance(layer, AttentionBlock):
+            #     x, att = layer(x)
+            #     attention_maps.append(att)
             else:
                 x = layer(x)
+        # if len(attention_maps) > 0:
+        #     attention_maps = th.stack(attention_maps)
+        # else:
+        #     attention_maps = None
         return x
 
 
@@ -383,6 +391,37 @@ class QKVAttention(nn.Module):
     def count_flops(model, _x, y):
         return count_flops_attn(model, _x, y)
 
+### Functions helping to track attention maps
+def save_tensors(module: nn.Module, features, name: str):
+    """ Process and save activations in the module. """
+    """ From this repository: https://github.com/yandex-research/ddpm-segmentation """
+    if type(features) in [list, tuple]:
+        features = [f.detach().float() if f is not None else None 
+                    for f in features]
+        setattr(module, name, features)
+    elif isinstance(features, dict):
+        features = {k: f.detach().float() for k, f in features.items()}
+        setattr(module, name, features)
+    else:
+        setattr(module, name, features.detach().float())
+
+
+def save_input_hook(self, inp, out):
+    save_tensors(self, inp[0], 'qkv')
+    return out
+
+def attention_from_qkv(qkv, num_heads):
+    bs, width, length = qkv.shape
+    assert width % (3 * num_heads) == 0
+    ch = width // (3 * num_heads)
+    q, k, v = qkv.reshape(bs * num_heads, ch * 3, length).split(ch, dim=1)
+    scale = 1 / math.sqrt(math.sqrt(ch))
+    weight = th.einsum(
+        "bct,bcs->bts", q * scale, k * scale
+    )  # More stable with f16 than dividing afterwards
+    weight = th.softmax(weight.float(), dim=-1).type(weight.dtype)
+    return weight
+
 
 class UNetModel(nn.Module):
     """
@@ -472,8 +511,11 @@ class UNetModel(nn.Module):
             [TimestepEmbedSequential(conv_nd(dims, in_channels, ch, 3, padding=1))]
         )
         self._feature_size = ch
+        self.input_attention_depth = []
+        self.output_attention_depth = []
         input_block_chans = [ch]
         ds = 1
+        attention_level = len(self.input_blocks)
         for level, mult in enumerate(channel_mult):
             for _ in range(num_res_blocks):
                 layers = [
@@ -498,11 +540,14 @@ class UNetModel(nn.Module):
                             use_new_attention_order=use_new_attention_order,
                         )
                     )
+                    self.input_attention_depth.append(attention_level)
                 self.input_blocks.append(TimestepEmbedSequential(*layers))
                 self._feature_size += ch
                 input_block_chans.append(ch)
+                attention_level += 1
             if level != len(channel_mult) - 1:
                 out_ch = ch
+                attention_level += 1
                 self.input_blocks.append(
                     TimestepEmbedSequential(
                         ResBlock(
@@ -552,7 +597,6 @@ class UNetModel(nn.Module):
             ),
         )
         self._feature_size += ch
-
         self.output_blocks = nn.ModuleList([])
         for level, mult in list(enumerate(channel_mult))[::-1]:
             for i in range(num_res_blocks + 1):
@@ -570,6 +614,7 @@ class UNetModel(nn.Module):
                 ]
                 ch = int(model_channels * mult)
                 if ds in attention_resolutions:
+                    
                     layers.append(
                         AttentionBlock(
                             ch,
@@ -579,6 +624,7 @@ class UNetModel(nn.Module):
                             use_new_attention_order=use_new_attention_order,
                         )
                     )
+                    self.output_attention_depth.append(len(self.output_blocks))
                 if level and i == num_res_blocks:
                     out_ch = ch
                     layers.append(
@@ -598,6 +644,22 @@ class UNetModel(nn.Module):
                     ds //= 2
                 self.output_blocks.append(TimestepEmbedSequential(*layers))
                 self._feature_size += ch
+
+
+        # Register forward hook to the attention map
+        self.sel_attn_block = {}
+        self.sel_attn_block["middle"] = []
+        self.sel_attn_block["middle"].append(self.middle_block[1].attention)
+        self.sel_attn_block["middle"][0].register_forward_hook(save_input_hook)
+        self.sel_attn_block["input"] = []
+        self.sel_attn_block["output"] = []
+        for i, sel_attn_depth in enumerate(self.output_attention_depth):
+            # assert sel_attn_depth <= 8 and sel_attn_depth >= 0, "sel_attn_depth must be between 0 and 8"
+            self.sel_attn_block["output"].append(self.output_blocks[sel_attn_depth][1].attention)
+            self.sel_attn_block["output"][i].register_forward_hook(save_input_hook)
+        for i, sel_attn_depth in enumerate(self.input_attention_depth):
+            self.sel_attn_block["input"].append(self.input_blocks[sel_attn_depth][1].attention)
+            self.sel_attn_block["input"][i].register_forward_hook(save_input_hook) 
 
         self.out = nn.Sequential(
             normalization(ch),
@@ -621,7 +683,90 @@ class UNetModel(nn.Module):
         self.middle_block.apply(convert_module_to_f32)
         self.output_blocks.apply(convert_module_to_f32)
 
-    def forward(self, x, timesteps, y=None, return_attention = True):
+    def get_attention_maps(self, x = None, timesteps = None, block = None, level=-1, run_forward = False):
+        attention_maps = {}
+        if run_forward:
+            assert x is not None and timesteps is not None
+            h = self.forward(x, timesteps)
+        if block is None:
+            for block in ['input', 'middle', 'output']:
+                attention_maps[block] = []
+                if level == -1:
+                    for attention_layer in self.sel_attn_block[block]:
+                        qkv = attention_layer.qkv
+                        attention = attention_from_qkv(qkv, attention_layer.n_heads)
+                        attention_maps[block].append(attention.cpu())
+                else:
+                    assert len(self.sel_attn_block[block]) > level
+                    attention_layer = self.sel_attn_block[block][level]
+                    qkv = attention_layer.qkv
+                    attention = attention_from_qkv(qkv, attention_layer.n_heads)
+                    attention_maps[block].append(attention.cpu())
+        else:
+            assert block in self.sel_attn_block.keys()
+            attention_maps[block] = []
+            if level == -1:
+                for attention_layer in self.sel_attn_block[block]:
+                    qkv = attention_layer.qkv
+                    attention = attention_from_qkv(qkv, attention_layer.n_heads)
+                    attention_maps[block].append(attention.cpu())
+            else:
+                assert len(self.sel_attn_block[block]) > level
+                attention_layer = self.sel_attn_block[block][level]
+                qkv = attention_layer.qkv
+                attention = attention_from_qkv(qkv, attention_layer.n_heads)
+                attention_maps[block].append(attention.cpu())
+        return attention_maps
+
+
+    
+    def get_last_selfattention(self, x, timesteps, y=None):
+        """
+        Apply the model to an input batch.
+        :param x: an [N x C x ...] Tensor of inputs.
+        :param timesteps: a 1-D batch of timesteps.
+        :param y: an [N] Tensor of labels, if class-conditional.
+        :return: a list of [N x C x ...] Tensor of attentions.
+        """
+        attention_maps = []
+        assert (y is not None) == (self.num_classes is not None), "must specify y if and only if the model is class-conditional"
+        hs = [] 
+        emb = self.time_embed(timestep_embedding(timesteps, self.model_channels))
+
+        if self.num_classes is not None:
+            assert y.shape == (x.shape[0],)
+            emb = emb + self.label_emb(y)
+
+        h = x.type(self.dtype)
+        for module in self.input_blocks:
+            if isinstance(module, TimestepEmbedSequential) or isinstance(module, AttentionBlock):
+                h, att = module(h, emb)
+                if att is not None:
+                    attention_maps.append(att)
+            else:
+                h = module(h,emb)
+            hs.append(h)
+
+        h, att = self.middle_block(h, emb)
+        if att is not None:
+            attention_maps.append(att)
+        for module in self.output_blocks:
+            h = th.cat([h, hs.pop()], dim=1)
+            if isinstance(module, TimestepEmbedSequential) or isinstance(module, AttentionBlock):
+                h, att = module(h, emb)
+                if att is not None:
+                    attention_maps.append(att)
+            else:
+                h = module(h, emb)
+
+        if len(attention_maps)>0:
+            attention_maps = attention_maps
+        else:
+            attention_maps = None
+        return att, attention_maps
+
+
+    def forward(self, x, timesteps, y=None):
         """
         Apply the model to an input batch.
         :param x: an [N x C x ...] Tensor of inputs.
@@ -633,36 +778,34 @@ class UNetModel(nn.Module):
                 self.num_classes is not None
         ), "must specify y if and only if the model is class-conditional"
 
-        hs = []
-        
+        hs = [] 
         emb = self.time_embed(timestep_embedding(timesteps, self.model_channels))
 
         if self.num_classes is not None:
             assert y.shape == (x.shape[0],)
             emb = emb + self.label_emb(y)
 
-       
         h = x.type(self.dtype)
         for module in self.input_blocks:
-            if isinstance(module, AttentionBlock) or isinstance(module, TimestepEmbedSequential) and return_attention:
-                h = module(h, emb)
-            else:
-                h = module(h, emb)
+            h = module(h, emb)
             hs.append(h)
 
         h = self.middle_block(h, emb)
 
-
         for module in self.output_blocks:
             h = th.cat([h, hs.pop()], dim=1)
-            if isinstance(module, AttentionBlock) or isinstance(module, TimestepEmbedSequential) and return_attention:
-                h = module(h, emb)
-            else:
-                h = module(h, emb)
+            h = module(h, emb)
 
         h = h.type(x.dtype)
         h = self.out(h)
-        return h
+
+        with th.no_grad():
+            attention_maps = self.get_attention_maps()
+        # if return_attention:
+        #     attention_maps = self.get_attention_maps()
+        #     return h, attention_maps
+        # else:
+        return h , attention_maps
 
 
 class SuperResModel(UNetModel):

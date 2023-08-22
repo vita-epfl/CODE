@@ -258,7 +258,7 @@ class DDIB_Trainer(BaseTrainer):
                     self.schedule_sampler.update_with_local_losses(
                         t, losses["loss"].detach()
                     )
-
+                
                 loss = (losses["loss"] * weights).mean() / number_of_accumulation
                 total_loss += loss.detach().cpu().item()
 

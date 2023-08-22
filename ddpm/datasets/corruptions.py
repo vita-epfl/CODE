@@ -364,6 +364,36 @@ def zoom_blur(x, severity=1):
     x = (x + out) / (len(c) + 1)
     return np.clip(x, 0, 1) * 255
 
+def masking_simple(x, severity=1):
+    shape = x.shape
+    percentage_masking = severity * 0.14
+    mask = torch.rand((1,shape[1],shape[2]))>percentage_masking
+    mask = mask.repeat(shape[0],1,1).float()
+    return x * mask
+
+def masking_random_color(x, severity = 1):
+    shape = x.shape
+    percentage_masking = severity * 0.14
+    mask = (torch.rand((1,shape[1],shape[2]))>percentage_masking).repeat(shape[0],1,1)
+    mask = mask.float()
+    color = torch.rand((shape[0],1,1), device = x.device)
+    color = color.repeat(1,shape[1],shape[2])
+    return (1-mask) * color + mask * x
+
+def masking_gaussian(x, severity=1):
+    shape = x.shape
+    percentage_masking = severity * 0.14
+    mask = (torch.rand((1,shape[1],shape[2]))>percentage_masking).repeat(shape[0],1,1).float()
+    filling = torch.clamp(torch.randn_like(x),-1,1)
+    return (1-mask) * filling + mask * x
+
+def masking_line(x, severity=1):
+    shape = x.shape
+    percentage_masking = severity * 0.14
+    mask_h = (torch.rand((1,shape[1],1))>percentage_masking).repeat(shape[0],1,shape[2]).float()
+    mask_v = (torch.rand((1,1,shape[2]))>percentage_masking).repeat(shape[0],shape[1],1).float()
+    return torch.clamp((1-mask_h) + (1-mask_v),-1,1) + mask_h*mask_v*x
+
 
 # def barrel(x, severity=1):
 #     c = [(0,0.03,0.03), (0.05,0.05,0.05), (0.1,0.1,0.1),

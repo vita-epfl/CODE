@@ -16,13 +16,13 @@ random_flip: False #help='Whether to use random flip in training')
 
 original_img_size: [1024,2048]
 first_crop: 
-lower_image_size: [128,256]
-img_size: 128 #help='image size')
+lower_image_size: [256,512]
+img_size: 256 #help='image size')
 
 # UNet
 input_channel: 3
 kernel_size: 3
-ch: 128  #help='base channel of UNet')
+ch: 256  #help='base channel of UNet')
 ch_mult:  #help='channel multiplier')
 attention_resolutions: "32,16,8"
 # attn: [3,4,5] #help='add attention to these levels')
@@ -37,7 +37,7 @@ resblock_updown: False
 beta_schedule: "linear"
 num_timesteps: 1000 #help='total diffusion steps')
 mean_type: EPSILON #['PREVIOUS_X', 'START_X', 'EPSILON'], help='predict variable')
-var_type: FIXED_LARGE #['FIXED_LARGE', 'FIXED_SMALL', LEARNED_RANGE, LEARNED], help='variance type')
+var_type: LEARNED_RANGE #['FIXED_LARGE', 'FIXED_SMALL', LEARNED_RANGE, LEARNED], help='variance type')
 schedule_sampler: "uniform"
 loss_type: RESCALED_MSE
 
@@ -46,8 +46,8 @@ lr: 1e-4 #help='target learning rate')
 grad_clip:  #help="gradient norm clipping")
 total_steps: 1000000 #help='total training steps')
 warmup: 0 #help='learning rate warmup')
-batch_size: 48 #help='batch size')
-microbatch: 12
+batch_size: 16 #help='batch size')
+microbatch: 2
 num_workers: 4 #help='workers of Dataloader')
 ema_decay: 0.999 #help="ema decay rate")
 weight_decay: 0.01
@@ -73,7 +73,7 @@ clip_denoised: False
 progress: False
 
 # Evaluation
-save_step: 50000 #help='frequency of saving checkpoints, 0 to disable during training')
+save_step: 10000 #help='frequency of saving checkpoints, 0 to disable during training')
 eval_step: 0 #help='frequency of evaluating model, 0 to disable during training')
 num_images: 50000 #help='the number of generated images for evaluation')
 fid_use_torch: False #help='calculate IS and FID on gpu')
@@ -89,4 +89,4 @@ slurm:
   partition: gpu
   qos: gpu
   account: vita # optional
-  reservation: vita-neurips
+  reservation: 
