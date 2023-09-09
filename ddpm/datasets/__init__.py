@@ -41,6 +41,7 @@ def get_dataset(args, cfg):
     datapath = args.datapath
     corruption_severity = args.corruption_severity
     corruption = args.corruption
+    split = args.split
     random_flip = args.random_flip
     lower_image_size = args.lower_image_size
     image_size = args.img_size

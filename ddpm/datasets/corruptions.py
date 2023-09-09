@@ -365,34 +365,76 @@ def zoom_blur(x, severity=1):
     return np.clip(x, 0, 1) * 255
 
 def masking_simple(x, severity=1):
-    shape = x.shape
+    shape = np.array(x).shape # heigth, width, channels
     percentage_masking = severity * 0.14
-    mask = torch.rand((1,shape[1],shape[2]))>percentage_masking
-    mask = mask.repeat(shape[0],1,1).float()
+    mask = (np.random.rand(shape[0],shape[1],1)>percentage_masking).repeat(shape[2], axis=2).astype(float)
     return x * mask
 
 def masking_random_color(x, severity = 1):
-    shape = x.shape
+    shape = np.array(x).shape # heigth, width, channels
     percentage_masking = severity * 0.14
-    mask = (torch.rand((1,shape[1],shape[2]))>percentage_masking).repeat(shape[0],1,1)
-    mask = mask.float()
-    color = torch.rand((shape[0],1,1), device = x.device)
-    color = color.repeat(1,shape[1],shape[2])
+    mask = (np.random.rand(shape[0],shape[1],1)>percentage_masking).repeat(shape[2], axis=2).astype(float)
+    color = np.random.randint(low = 0, high =255,size=(1,1,shape[2]), dtype = int)
+    color = color.repeat(shape[0], axis = 0).repeat(shape[1],axis=1)
     return (1-mask) * color + mask * x
 
+def masking_random_color_random(x, severity = 1):
+    shape = np.array(x).shape # heigth, width, channels
+    percentage_masking = severity * 0.14
+    mask = (np.random.rand(shape[0],shape[1],1)>percentage_masking).repeat(shape[2], axis=2).astype(float)
+    color = np.random.randint(low = 0, high =255,size=(shape[0],shape[1],shape[2]), dtype = int)
+    # color = color.repeat(shape[0], axis = 0).repeat(shape[1],axis=1)
+    return (1-mask) * color + mask * x
+
+def masking_vline_random_color(x, severity = 1):
+    shape = np.array(x).shape # heigth, width, channels
+    percentage_masking = severity * 0.14
+    mask = (np.random.rand(1,shape[1],shape[2])>percentage_masking).repeat(shape[0], axis=0).astype(float)
+    color = np.random.randint(low = 0, high =255,size=(1,shape[1],shape[2]), dtype = int)
+    color = color.repeat(shape[0], axis = 0)
+    return (1-mask) * color + mask * x
+
+def masking_hline_random_color(x, severity = 1):
+    shape = np.array(x).shape # heigth, width, channels
+    percentage_masking = severity * 0.14
+    mask = (np.random.rand(shape[0],1,shape[2])>percentage_masking).repeat(shape[1], axis=1).astype(float)
+    color = np.random.randint(low = 0, high =255,size=(shape[0],1,shape[2]), dtype = int)
+    color = color.repeat(shape[1],axis=1)
+    return (1-mask) * color + mask * x
+
+def masking_gaussian_line(x, severity=1):
+    shape = np.array(x).shape # heigth, width, channels
+    percentage_masking = severity * 0.14
+    mask = (np.random.rand(shape[0],shape[1],1)>percentage_masking).repeat(shape[2], axis=2).astype(float)
+    filling = 255 * mask
+    return np.clip(((1-mask) * filling + mask * x), a_min = 0, a_max = 255.9999).astype(int)
+
 def masking_gaussian(x, severity=1):
+    shape = np.array(x).shape # heigth, width, channels
+    percentage_masking = severity * 0.14
+    mask = (np.random.rand(shape[0],shape[1],1)>percentage_masking).repeat(shape[2], axis=2).astype(float)
+    filling = 255 * np.random.randn(shape[0],shape[1],shape[2])  
+    return np.clip(((1-mask) * filling + mask * x), a_min = 0, a_max = 255.9999).astype(int)
+
+def masking_color_lines(x, severity=1):
+    # heigth, width, channels
+    x = torch.from_numpy(np.array(x))
     shape = x.shape
     percentage_masking = severity * 0.14
-    mask = (torch.rand((1,shape[1],shape[2]))>percentage_masking).repeat(shape[0],1,1).float()
-    filling = torch.clamp(torch.randn_like(x),-1,1)
-    return (1-mask) * filling + mask * x
+    mask = (torch.rand(1,shape[1],shape[2])>percentage_masking).repeat(shape[0],1,1)
+    mask = mask.float()
+    color = torch.rand((shape[0],1,1))
+    color = color.repeat(1,shape[1],shape[2])
+    return ((1-mask) * color + mask * x).numpy()
 
 def masking_line(x, severity=1):
-    shape = x.shape
-    percentage_masking = severity * 0.14
-    mask_h = (torch.rand((1,shape[1],1))>percentage_masking).repeat(shape[0],1,shape[2]).float()
-    mask_v = (torch.rand((1,1,shape[2]))>percentage_masking).repeat(shape[0],shape[1],1).float()
-    return torch.clamp((1-mask_h) + (1-mask_v),-1,1) + mask_h*mask_v*x
+    x = np.array(x)
+    
+    shape = x.shape # heigth, width, channels
+    percentage_masking = severity * 0.1
+    mask_h = (np.random.rand(1,shape[1],1)>percentage_masking).repeat(shape[0], axis = 0).repeat(shape[2], axis = 2).astype(float)
+    mask_v = (np.random.rand(shape[0],1,1)>percentage_masking).repeat(shape[1], axis=1).repeat(shape[2], axis = 2).astype(float)
+    return mask_h*mask_v*x
 
 
 # def barrel(x, severity=1):
@@ -430,11 +472,15 @@ def frost(x, severity=1):
          (0.65, 0.7),
          (0.6, 0.75)][severity - 1]
     idx = np.random.randint(5)
-    filename = ['./frost1.png', './frost2.png', './frost3.png', './frost4.jpg', './frost5.jpg', './frost6.jpg'][idx]
+    import os
+    print(os.getcwd())
+    filename = ['ddpm/datasets/frost1.png', 'ddpm/datasets/frost2.png', 'ddpm/datasets/frost3.png', 'ddpm/datasets/frost4.jpg', 
+                    'ddpm/datasets/frost5.jpg', 'ddpm/datasets/frost6.jpg'][idx]
     frost = cv2.imread(filename)
     # randomly crop and convert to rgb
-    x_start, y_start = np.random.randint(0, frost.shape[0] - 224), np.random.randint(0, frost.shape[1] - 224)
-    frost = frost[x_start:x_start + 224, y_start:y_start + 224][..., [2, 1, 0]]
+    shape = np.array(x).shape
+    x_start, y_start = np.random.randint(0, frost.shape[0] - shape[0]), np.random.randint(0, frost.shape[1] - shape[1])
+    frost = frost[x_start:x_start + shape[0], y_start:y_start + shape[1]][..., [2, 1, 0]]
 
     return np.clip(c[0] * np.array(x) + c[1] * frost, 0, 255)
 

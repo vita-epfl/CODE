@@ -152,17 +152,58 @@ class CelebA(VisionDataset):
             else:
                 raise ValueError("Target type \"{}\" is not recognized.".format(t))
         target = tuple(target) if len(target) > 1 else target[0]
-
+        
         if self.corruption is not None:
             if self.corruption == "black_and_white":
                 filter = ImageEnhance.Color(X)
                 X = filter.enhance(0)
+            elif self.corruption == "speckle_noise":
+                X = PIL.Image.fromarray(speckle_noise(X, severity  = self.corruption_severity).astype(np.uint8))
+            elif self.corruption == "gaussian_noise":
+                X = PIL.Image.fromarray(gaussian_noise(X, severity  = self.corruption_severity).astype(np.uint8))
+            elif self.corruption == "shot_noise":
+                X = PIL.Image.fromarray(shot_noise(X, severity  = self.corruption_severity).astype(np.uint8))
+            elif self.corruption == "impulse_noise":
+                X = PIL.Image.fromarray(impulse_noise(X, severity  = self.corruption_severity).astype(np.uint8))
+            elif self.corruption == "spatter":
+                X = PIL.Image.fromarray(spatter(X, severity  = self.corruption_severity).astype(np.uint8))
+            elif self.corruption == "zoom_blur":
+                X = PIL.Image.fromarray(zoom_blur(X, severity  = self.corruption_severity).astype(np.uint8))
+            elif self.corruption == "elastic_transform":
+                X = PIL.Image.fromarray(elastic_transform(X, severity  = self.corruption_severity).astype(np.uint8))
+            elif self.corruption == "jpeg_compression":
+                X = PIL.Image.fromarray(jpeg_compression(X, severity  = self.corruption_severity).astype(np.uint8))
+            elif self.corruption == "pixelate":
+                X = PIL.Image.fromarray(pixelate(X, severity  = self.corruption_severity).astype(np.uint8))
+            elif self.corruption == "saturate":
+                X = PIL.Image.fromarray(saturate(X, severity  = self.corruption_severity).astype(np.uint8)) 
+            elif self.corruption == "masking_random_color_random":
+                X = PIL.Image.fromarray(masking_random_color_random(X, severity  = self.corruption_severity).astype(np.uint8)) 
+            elif self.corruption == "masking_hline_random_color":
+                X = PIL.Image.fromarray(masking_hline_random_color(X, severity  = self.corruption_severity).astype(np.uint8))
+            elif self.corruption == "masking_vline_random_color":
+                X = PIL.Image.fromarray(masking_vline_random_color(X, severity  = self.corruption_severity).astype(np.uint8))
+            elif self.corruption == "masking_random_color":
+                X = PIL.Image.fromarray(masking_random_color(X, severity  = self.corruption_severity).astype(np.uint8))
+            elif self.corruption == "masking_simple":
+                X = PIL.Image.fromarray(masking_simple(X, severity  = self.corruption_severity).astype(np.uint8))
+            elif self.corruption == "masking_color_lines":
+                X = PIL.Image.fromarray(masking_color_lines(X, severity  = self.corruption_severity).astype(np.uint8))
+            elif self.corruption == "masking_line":
+                X = PIL.Image.fromarray(masking_line(X, severity  = self.corruption_severity).astype(np.uint8))
+            elif self.corruption == "masking_gaussian":
+                X = PIL.Image.fromarray(masking_gaussian
+                (X, severity  = self.corruption_severity).astype(np.uint8))
             elif self.corruption == 'gaussian_blur':
                 X = PIL.Image.fromarray(gaussian_blur(X, severity  = self.corruption_severity).astype(np.uint8))
+            elif self.corruption == 'motion_blur':
+                X = PIL.Image.fromarray(motion_blur(X, severity  = self.corruption_severity).astype(np.uint8))
             elif self.corruption == "glass_blur":
                 X = PIL.Image.fromarray(glass_blur(X, severity  = self.corruption_severity).astype(np.uint8))
             elif self.corruption == "defocus_blur":
                 X = PIL.Image.fromarray(defocus_blur(X, severity  = self.corruption_severity).astype(np.uint8))
+            elif self.corruption == "frost":
+                X = PIL.Image.fromarray(frost(X, severity  = self.corruption_severity).astype(np.uint8))
             elif self.corruption == "fog":
                 X = PIL.Image.fromarray(fog(X, severity  = self.corruption_severity).astype(np.uint8))
             elif self.corruption == "brightness":

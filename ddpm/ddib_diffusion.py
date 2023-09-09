@@ -504,7 +504,6 @@ class GaussianDiffusion:
         if progress:
             # Lazy import so that we don't depend on tqdm.
             from tqdm.auto import tqdm
-
             indices = tqdm(indices)
 
         for i in indices:
@@ -571,6 +570,7 @@ class GaussianDiffusion:
         sample = mean_pred + nonzero_mask * sigma * noise
         return {"sample": sample, "pred_xstart": out["pred_xstart"], "attention_maps":out["attention_maps"]}
 
+
     def ddim_sample_with_langevin(
             self,
             model,
@@ -583,11 +583,13 @@ class GaussianDiffusion:
             eta=0.0,
             epsilon = 0.01,
             K = 5,
+            langevin_step=10,
     ):
         """
         Sample x_{t-1} from the model using DDIM.
         Same usage as p_sample().
         """
+        device = next(model.parameters()).device
         if self.model_var_type in [ModelVarType.FIXED_LARGE,ModelVarType.FIXED_SMALL]:
             model_variance, model_log_variance = {
                 # for fixedlarge, we set the initial (log-)variance like so
@@ -601,21 +603,50 @@ class GaussianDiffusion:
                     self.posterior_log_variance_clipped,
                 ),
             }[self.model_var_type]
-                
-            model_variance = _extract_into_tensor(model_variance, t, x.shape)
-            model_log_variance = _extract_into_tensor(model_log_variance, t, x.shape)
-        else: 
-            raise NotImplementedError
-
+        # print("variance shape",model_variance,model_variance.shape)
+        _, model_variance, model_log_variance = self.q_mean_variance(x, t)
+        # print("original variance shape", model_variance_ori ,model_variance_ori.shape, )
+        # model_variance = model_variance.cpu().squeeze()
+        # model_log_variance = model_log_variance.cpu().squeeze()
+        # model_variance_tensor = _extract_into_tensor(model_variance, t, x.shape)
+        # print("variance tensor",model_variance_tensor,model_variance_tensor.shape)
+        # model_log_variance_tensor = _extract_into_tensor(model_log_variance, t, x.shape)
+        step_0 = th.tensor([0] * x.shape[0], device=device)
+        _,smallest_variance,_ = self.q_mean_variance(x, step_0)
+        # smallest_variance = 0.01^2
+        # smallest_variance = _extract_into_tensor(model_variance, step_0, x.shape)
+        # print("variance",model_variance.mean())
+        # print("smallest_variance", smallest_variance.mean())
+        # else: 
+        #     raise NotImplementedError
+        gradient_step_scale = []
+        noise_step_scale = []
         with th.no_grad():
-            for i in range(K):
-                if model_kwargs is None:
-                    model_kwargs = {}
-                
-                model_output, attn_maps = model(x, t, **model_kwargs)
-                x = x - epsilon * model_output / (2*th.clamp(th.sqrt(model_variance),0.001,1))
-                if i < K-1:
-                    x = x +  np.sqrt(epsilon) * th.randn_like(x) #* th.sqrt(model_variance)
+            if th.sqrt(model_variance).mean().item() > 0.01 and ((self.num_timesteps - 1 - int(t.float().mean().item())) % langevin_step == 0):
+                # print(f"variance_{int(t.float().mean().item())}",th.sqrt(model_variance).mean().item())
+                alpha_i = epsilon * model_variance / smallest_variance # sigma_i^2 / sigma_end^2 but sigma_end^2 = 1
+                # print(f"alpha_{int(t.float().mean().item())}", alpha_i.mean())
+                for i in range(K):
+                    if model_kwargs is None:
+                        model_kwargs = {}
+                    model_output, attn_maps = model(x, t, **model_kwargs)
+                    
+                    # x = (_extract_into_tensor(self.sqrt_alphas_cumprod, t, x_start.shape) * pred_xstart + _extract_into_tensor(self.sqrt_one_minus_alphas_cumprod, t, x_start.shape)* model_output)
+                    if clip_denoised:
+                        #clipping the predicted x_start then pushing it back to the estimated noise
+                        pred_xstart = (self._predict_xstart_from_eps(x_t=x, t=t, eps=model_output)).clamp(-1,1)
+                        noise = (x - _extract_into_tensor(self.sqrt_alphas_cumprod, t, pred_xstart.shape) * pred_xstart) /  _extract_into_tensor(self.sqrt_one_minus_alphas_cumprod, t, pred_xstart.shape)
+                    else:
+                        noise = model_output
+                    x = x - alpha_i * noise / th.sqrt(model_variance)
+                    gradient_step_scale.append(th.abs(alpha_i * noise / th.sqrt(model_variance)).mean().cpu())
+                    if i < K-1:
+                        x = x + th.sqrt(2*alpha_i) * th.randn_like(x)
+                        noise_step_scale.append(th.abs(th.sqrt(2*alpha_i) * th.randn_like(x)).mean().cpu())
+                        # if epsilon < 1:
+                    #     x = x +  epsilon * th.randn_like(x) #* th.sqrt(model_variance)
+                    # else:
+                    #     x = x +  np.sqrt(epsilon) * th.randn_like(x) #* th.sqrt(model_variance)
                 
         out = self.p_mean_variance(
             model,
@@ -649,7 +680,8 @@ class GaussianDiffusion:
             (t != 0).float().view(-1, *([1] * (len(x.shape) - 1)))
         )  # no noise when t == 0
         sample = mean_pred + nonzero_mask * sigma * noise
-        return {"sample": sample, "pred_xstart": out["pred_xstart"], "attention_maps":out["attention_maps"]}
+        return {"sample": sample, "pred_xstart": out["pred_xstart"], "attention_maps":out["attention_maps"], 
+                        "gradient_step_scale" : gradient_step_scale, "noise_step_scale" : noise_step_scale}
 
     def ddim_sample_loop(
             self,
@@ -699,6 +731,7 @@ class GaussianDiffusion:
             langevin = False,            
             epsilon = 0.01,
             K = 5,
+            langevin_step = 10,
     ):
         """
         Use DDIM to sample from the model and yield intermediate samples from
@@ -734,7 +767,8 @@ class GaussianDiffusion:
                     model_kwargs=model_kwargs,
                     eta=eta,
                     epsilon=epsilon,
-                    K=K
+                    K=K,
+                    langevin_step = langevin_step,
                 )   
                 else:
                     out = self.ddim_sample(

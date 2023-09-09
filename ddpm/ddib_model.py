@@ -17,6 +17,30 @@ from ddpm.ddib_utils import (
 )
 
 
+def get_mixing_schedule(schedule_name="linear", num_diffusion_timesteps=1000):
+    """
+    Get a pre-defined beta schedule for the given name.
+    The beta schedule library consists of beta schedules which remain similar
+    in the limit of num_diffusion_timesteps.
+    Beta schedules may be added, but should not be removed or changed once
+    they are committed to maintain backwards compatibility.
+    """
+    if schedule_name == "linear":
+        # Linear schedule from Ho et al, extended to work for any number of
+        # diffusion steps.
+        return np.linspace(
+            0, 1, num_diffusion_timesteps, dtype=np.float64
+        )
+    elif schedule_name == "cosine":
+        def cos_schedule(t):
+            return math.cos((t + 0.008) / 1.008 * math.pi / 2) ** 2
+        return np.array([1-cos_schedule(1-i/num_diffusion_timesteps) for i in range(num_diffusion_timesteps)])
+    elif schedule_name == "constant":
+        return np.array([1 for i in range(num_diffusion_timesteps)])
+    else:
+        raise NotImplementedError(f"unknown beta schedule: {schedule_name}")
+
+
 class AttentionPool2d(nn.Module):
     """
     Adapted from CLIP: https://github.com/openai/CLIP/blob/main/clip/model.py
@@ -67,7 +91,7 @@ class TimestepEmbedSequential(nn.Sequential, TimestepBlock):
     support it as an extra input.
     """
 
-    def forward(self, x, emb):
+    def forward(self, x, emb, attention_weights=None, mixing_param = 1.):
         # attention_maps = []
         for layer in self:
             if isinstance(layer, TimestepBlock):
@@ -75,6 +99,8 @@ class TimestepEmbedSequential(nn.Sequential, TimestepBlock):
             # elif isinstance(layer, AttentionBlock):
             #     x, att = layer(x)
             #     attention_maps.append(att)
+            elif isinstance(layer, AttentionBlock):
+                x = layer(x, attention_weights, mixing_param)
             else:
                 x = layer(x)
         # if len(attention_maps) > 0:
@@ -294,7 +320,7 @@ class AttentionBlock(nn.Module):
 
         self.proj_out = zero_module(conv_nd(1, channels, channels, 1))
 
-    def forward(self, x):
+    def forward(self, x, attention_weights=None, mixing_weights = None):
         return checkpoint(self._forward, (x,), self.parameters(), True)
 
     def _forward(self, x):
@@ -335,7 +361,7 @@ class QKVAttentionLegacy(nn.Module):
         super().__init__()
         self.n_heads = n_heads
 
-    def forward(self, qkv):
+    def forward(self, qkv, attention_weights = None, mixing_weights = 1.):
         """
         Apply QKV attention.
         :param qkv: an [N x (H * 3 * C) x T] tensor of Qs, Ks, and Vs.
@@ -350,6 +376,8 @@ class QKVAttentionLegacy(nn.Module):
             "bct,bcs->bts", q * scale, k * scale
         )  # More stable with f16 than dividing afterwards
         weight = th.softmax(weight.float(), dim=-1).type(weight.dtype)
+        if attention_weights is not None:
+            weight = attention_weights * mixing_weights + (1-mixing_weights) * weight
         a = th.einsum("bts,bcs->bct", weight, v)
         return a.reshape(bs, -1, length)
 
@@ -367,7 +395,7 @@ class QKVAttention(nn.Module):
         super().__init__()
         self.n_heads = n_heads
 
-    def forward(self, qkv):
+    def forward(self, qkv, attention_weights = None, mixing_weights = 1.):
         """
         Apply QKV attention.
         :param qkv: an [N x (3 * H * C) x T] tensor of Qs, Ks, and Vs.
@@ -384,6 +412,8 @@ class QKVAttention(nn.Module):
             (k * scale).view(bs * self.n_heads, ch, length),
         )  # More stable with f16 than dividing afterwards
         weight = th.softmax(weight.float(), dim=-1).type(weight.dtype)
+        if attention_weights is not None:
+            weight = attention_weights * mixing_weights + (1-mixing_weights) * weight
         a = th.einsum("bts,bcs->bct", weight, v.reshape(bs * self.n_heads, ch, length))
         return a.reshape(bs, -1, length)
 
@@ -451,6 +481,7 @@ class UNetModel(nn.Module):
     :param resblock_updown: use residual blocks for up/downsampling.
     :param use_new_attention_order: use a different attention pattern for potentially
                                     increased efficiency.
+    :param timesteps: number of timesteps in the diffusion model,  only used for mixing attentions maps.
     """
 
     def __init__(
@@ -474,6 +505,7 @@ class UNetModel(nn.Module):
             use_scale_shift_norm=False,
             resblock_updown=False,
             use_new_attention_order=False,
+            timesteps=1000,
         ):
         super().__init__()
 
@@ -495,7 +527,7 @@ class UNetModel(nn.Module):
         self.num_heads = num_heads
         self.num_head_channels = num_head_channels
         self.num_heads_upsample = num_heads_upsample
-
+        self.mixing_schedule = get_mixing_schedule("constant",timesteps)
         time_embed_dim = model_channels * 4
         self.time_embed = nn.Sequential(
             linear(model_channels, time_embed_dim),
@@ -766,7 +798,7 @@ class UNetModel(nn.Module):
         return att, attention_maps
 
 
-    def forward(self, x, timesteps, y=None):
+    def forward(self, x, timesteps, y=None, attention_weights = None):
         """
         Apply the model to an input batch.
         :param x: an [N x C x ...] Tensor of inputs.
@@ -786,8 +818,12 @@ class UNetModel(nn.Module):
             emb = emb + self.label_emb(y)
 
         h = x.type(self.dtype)
-        for module in self.input_blocks:
-            h = module(h, emb)
+        for i, module in enumerate(self.input_blocks):
+            if i == self.input_attention_depth[0]:
+                mixing_param = timesteps.cpu().apply_(lambda t: self.mixing_schedule[t])
+                h = module(h, emb, attention_weights, mixing_param)
+            else:
+                h = module(h, emb)
             hs.append(h)
 
         h = self.middle_block(h, emb)

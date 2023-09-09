@@ -38,6 +38,7 @@ from ddpm.trainers.base_trainer import BaseTrainer
 from ddpm.ddib_diffusion import GaussianDiffusion, SpacedDiffusion, ModelMeanType, ModelVarType, LossType, get_named_beta_schedule, space_timesteps
 from ddpm.ddib_model import UNetModel
 from ddpm.ddib_utils import *
+from ddpm.utils.utils import image_align, compute_psnr, compute_ssim, proc_metrics
 from ddpm.ddib_samplers import LossAwareSampler, UniformSampler, create_named_schedule_sampler
 from ddpm.fp_16_utils import MixedPrecisionTrainer
 import wandb
@@ -115,7 +116,13 @@ class DDIB_Trainer(BaseTrainer):
         self.writer = None
 
         os.environ["TORCH_DISTRIBUTED_DEBUG"] = "DETAIL"
-        if self.cfg.trainer.rank == 0:
+        if self.cfg.trainer.test_session:
+            if self.cfg.trainer.use_wandb:
+                wandb.init(project="DDIB_Training", entity=self.cfg.trainer.wandb_entity, group="Denoising_Test" ,sync_tensorboard=True)
+                wandb.run.name = self.cfg.trainer.ml_exp_name
+                wandb.run.save()
+            self.writer = SummaryWriter(self.cfg.trainer.logdir)
+        elif self.cfg.trainer.rank == 0:
             if self.cfg.trainer.use_clearml:
                 from clearml import Task
                 task = Task.init(project_name="Cityscape_Diffusion", task_name=self.cfg.trainer.ml_exp_name)
@@ -123,6 +130,7 @@ class DDIB_Trainer(BaseTrainer):
                 wandb.init(project="DDIB_Training", entity=self.cfg.trainer.wandb_entity, sync_tensorboard=True)
                 wandb.run.name = self.cfg.trainer.ml_exp_name
                 wandb.run.save()
+        
             self.writer = SummaryWriter(self.cfg.trainer.logdir)
 
         if self.cfg.trainer.gpu is not None:
@@ -415,6 +423,171 @@ class DDIB_Trainer(BaseTrainer):
             torch.save(ckpt, os.path.join(self.cfg.trainer.logdir, f'ckpt_{self.step}.pt'))
             # torch.save(ckpt, os.path.join(directory, f'ckpt_{self.step}.pt'))
 
+    def log_and_save_images(self, image_batch,corruption="",corruption_severity=-1, K=0, epsilon = -1,step = 0, loop = -1, gpu = 0, commit = True):
+        image_batch = ((image_batch/2)+0.5)
+        if K==0:
+            title = os.path.join(corruption, f"Reconstruction_severity_{corruption_severity}_loop{loop}")
+        else:
+            title = os.path.join(corruption, f"severity_{corruption_severity}_K_{K}_Epsilon_{epsilon}_loop_{loop}_{step}")
+        path_string = os.path.join(self.cfg.trainer.logdir, corruption, f"severity_{corruption_severity}", f"K_{K}", f"Epsilon_{epsilon}")
+        p = Path(path_string).expanduser()
+        p.mkdir(parents=True, exist_ok=True)
+        path = os.path.join(p, f"Sample_{gpu}_loop_{loop}.png")
+        grid = make_grid(image_batch.cpu().detach())
+        save_image(grid, path)
+        img_grid = wandb.Image(grid.permute(1,2,0).numpy())
+        wandb.log({title: img_grid},commit=commit)
+        
+        
+
+    @torch.no_grad()
+    def test_and_output(self,number_of_batch = 1, number_of_encoding_decoding = 3):
+        # if self.cfg.trainer.gpu != 0:
+        #     return
+        self.ddp_model.eval()
+
+        corruptions_list = ['glass_blur',"zoom_blur",'defocus_blur','fog','gaussian_blur',
+                            'pixelate',"jpeg_compression","impulse_noise","speckle_noise","gaussian_noise",
+                            'brightness','contrast','spatter',"saturate","shot_noise",
+                            'elastic_transform','snow','masking_color_lines','masking_random_color',
+                            'masking_gaussian','masking_hline_random_color','masking_simple','masking_line','masking_vline_random_color',]
+        corruptions_severities  = [3,5]
+        K_langevin_steps = [1,10,20,50]
+        epsilon_langevin = [2e-6,5e-6,1e-5,2e-5,4e-5,6e-5,8e-5,1e-4]
+        for corruption in corruptions_list:
+            for corruption_severity in corruptions_severities:
+                cfg = self.cfg
+                with open_dict(cfg):
+                    cfg.trainer.corruption = corruption
+                    cfg.trainer.corruption_severity = corruption_severity
+                    cfg.split = "test"
+                self.train_dataset, self.test_dataset = get_dataset(None, cfg)
+                LOG.info(f"train dataset length {len(self.test_dataset)}")
+
+                self.test_dataloader = create_dataloader(
+                    self.test_dataset,
+                    rank=cfg.trainer.rank,
+                    max_workers=cfg.trainer.num_workers,
+                    world_size=cfg.trainer.world_size,
+                    batch_size=cfg.trainer.batch_size,
+                    )
+                self.datalooper = infiniteloop(self.test_dataloader)
+                for step in range(number_of_batch):
+                    batch, original_target = next(self.datalooper)
+                    original_target = ((original_target/2)+0.5)
+                    grid_original_target = make_grid(original_target.cpu().detach())
+                    img_grid_original_target = wandb.Image(grid_original_target.permute(1,2,0).numpy())
+                    original_input = ((batch/2)+0.5)
+                    grid_original_input = make_grid(original_input.cpu().detach())
+                    img_grid_original_input = wandb.Image(grid_original_input.permute(1,2,0).numpy())
+                    wandb.log({f"Target_{step}": img_grid_original_target},commit=True)
+                    wandb.log({f"Input_{step}": img_grid_original_input},commit=True)
+                    psnr = 0
+                    ssim = 0
+                    for i in range(batch.shape[0]):
+                        original_psnr, original_ssim = proc_metrics(original_target[i].permute(1,2,0).numpy(), original_input[i].permute(1,2,0).numpy())
+                        psnr += original_psnr / batch.shape[0]
+                        ssim += original_ssim / batch.shape[0]
+                    wandb.log({f"Original PSNR": psnr},commit=True)
+                    wandb.log({f"Original_SSIM": ssim},commit=True)
+                    batch = batch.cuda(cfg.trainer.gpu)
+                    inputs = batch   
+                    ### ENCODING - DECODING  
+                    print("Reverse Encoding")   
+                    reverse_encoding = self.spaced_diffusion.ddim_reverse_sample_loop_progressive(self.ddp_model,inputs ,
+                                                                                    clip_denoised=True, eta=0.)
+                    ddpm_of_reencoded_tensor = []
+                    # ddpm_of_reencoded_attentions = []
+                    with torch.no_grad():
+                        for dic in tqdm(reverse_encoding):
+                            ddpm_of_reencoded_tensor.append(dic['sample'].cpu())
+                            # for key in dic['attention_maps']:
+                            #     list_cpu = [layer.cpu() for layer in dic['attention_maps'][key]]
+                            #     dic['attention_maps'][key] = list_cpu
+                            # ddpm_of_reencoded_attentions.append(dic['attention_maps'])
+                    
+                    ddim_sample = self.spaced_diffusion.ddim_sample_loop_progressive(self.ddp_model,inputs.shape, 
+                                                                    clip_denoised=True,noise=ddpm_of_reencoded_tensor[-1].cuda(cfg.trainer.gpu))
+                    ddpm_of_resampled_tensor = []
+                    # ddpm_of_resampled_attentions = []
+                    with torch.no_grad():
+                        for dic in tqdm(ddim_sample):
+                            ddpm_of_resampled_tensor.append(dic['sample'].cpu())
+                            # ddpm_of_resampled_attentions.append(dic['attention_maps'])
+                    print("Saving Images")   
+                    self.log_and_save_images(ddpm_of_resampled_tensor[-1],
+                                            corruption=corruption,
+                                            corruption_severity=corruption_severity,
+                                            K=0, 
+                                            epsilon=0,
+                                            gpu = cfg.trainer.gpu, 
+                                            step=step,
+                                            loop=-1)
+                    reconstructed_img = ((ddpm_of_resampled_tensor[-1]/2)+0.5)
+                    psnr = 0
+                    ssim = 0
+                    for i in range(batch.shape[0]):
+                        original_psnr, original_ssim = proc_metrics(original_target[i].permute(1,2,0).numpy(), reconstructed_img[i].permute(1,2,0).numpy())
+                        psnr += original_psnr / batch.shape[0]
+                        ssim += original_ssim / batch.shape[0]
+                    wandb.log({f"Post_inversion PSNR": psnr},commit=True)
+                    wandb.log({f"Post_inversion SSIM": ssim},commit=True)
+                    for K in K_langevin_steps:
+                        wandb.define_metric("epsilon_step")
+                        # define which metrics will be plotted against it
+                        for h in range(number_of_encoding_decoding):
+                            wandb.define_metric(f"psnr_severity_{corruption_severity}_K_{K}_loop_{h}", step_metric="epsilon_step")
+                            wandb.define_metric(f"ssim_severity_{corruption_severity}_K_{K}_loop_{h}", step_metric="epsilon_step")
+                        for epsilon in epsilon_langevin:
+                            latent = ddpm_of_reencoded_tensor[-1].cuda(cfg.trainer.gpu)
+                            if epsilon * K > 1e-3 - 0.000001:
+                                continue
+                            for j in range(number_of_encoding_decoding):
+                                print("Langevin Started")
+                                ddim_sample = self.spaced_diffusion.ddim_sample_loop_progressive(self.ddp_model,inputs.shape, clip_denoised=True,noise=latent,
+                                                                                            eta = 0., langevin=True, epsilon = epsilon, K=K)
+                                ddpm_of_post_resampled_tensor = []
+                                # ddpm_of_post_resampled_attentions = []
+                                with torch.no_grad():
+                                    for dic in tqdm(ddim_sample):
+                                        ddpm_of_post_resampled_tensor.append(dic['sample'].cpu())
+                                        # ddpm_of_post_resampled_attentions.append(dic['attention_maps'])
+                                inputs = ddpm_of_post_resampled_tensor[-1].cuda(cfg.trainer.gpu)
+                                self.log_and_save_images(inputs,
+                                            corruption=corruption,
+                                            corruption_severity=corruption_severity,
+                                            K=K, 
+                                            epsilon=epsilon,
+                                            gpu = cfg.trainer.gpu,
+                                            step=step, 
+                                            loop=j)
+                                reconstructed_img = ddpm_of_post_resampled_tensor[-1]/2 +0.5
+                                psnr = 0
+                                ssim = 0
+                                for i in range(batch.shape[0]):
+                                    original_psnr, original_ssim = proc_metrics(original_target[i].permute(1,2,0).numpy(), reconstructed_img[i].permute(1,2,0).numpy())
+                                    psnr += original_psnr / batch.shape[0]
+                                    ssim += original_ssim / batch.shape[0]
+                                log_dict = {
+                                    f"psnr_severity_{corruption_severity}_K_{K}_loop_{j}": psnr,
+                                    f"ssim_severity_{corruption_severity}_K_{K}_loop_{j}": ssim,
+                                    "epsilon_step": epsilon,  
+                                    }
+                                wandb.log(log_dict)
+                                if j < number_of_encoding_decoding -1:
+                                    reverse_new_encoding = self.spaced_diffusion.ddim_reverse_sample_loop_progressive(self.ddp_model,inputs ,
+                                                                                clip_denoised=True, eta=0.)
+                                    ddpm_of_new_reencoded_tensor = []
+                                    # ddpm_of_new_reencoded_attentions = []
+                                    with torch.no_grad():
+                                        for dic in tqdm(reverse_new_encoding):
+                                            ddpm_of_new_reencoded_tensor.append(dic['sample'].cpu())
+                                            # for key in dic['attention_maps']:
+                                                # list_cpu = [layer.cpu() for layer in dic['attention_maps'][key]]
+                                                # dic['attention_maps'][key] = list_cpu
+                                            # ddpm_of_new_reencoded_attentions.append(dic['attention_maps'])
+                                    latent = ddpm_of_new_reencoded_tensor[-1].cuda(cfg.trainer.gpu)
+
 
     def create_diffusion(self,):
         self.betas = get_named_beta_schedule(self.cfg.trainer.beta_schedule, self.cfg.trainer.num_timesteps)
@@ -469,22 +642,25 @@ class DDIB_Trainer(BaseTrainer):
                 with open_dict(self.cfg):
                     self.cfg.trainer.ch = ckpt_config.trainer.ch
                     self.cfg.trainer.ch_mult = ckpt_config.trainer.ch_mult
-                    self.cfg.trainer.attn = ckpt_config.trainer.attn
+                    self.cfg.trainer.attention_resolutions = ckpt_config.trainer.attention_resolutions
                     self.cfg.trainer.num_res_blocks = ckpt_config.trainer.num_res_blocks
                     self.cfg.trainer.dropout = ckpt_config.trainer.dropout
                     self.cfg.trainer.input_channel = ckpt_config.trainer.input_channel
                     self.cfg.trainer.kernel_size = ckpt_config.trainer.kernel_size
                     self.cfg.trainer.original_img_size = ckpt_config.trainer.original_img_size
-                    self.cfg.trainer.first_crop = ckpt_config.trainer.first_crop
                     self.cfg.trainer.lower_image_size = ckpt_config.trainer.lower_image_size
                     self.cfg.trainer.img_size = ckpt_config.trainer.img_size
-                self.net_model_state_dict= ckpt['net_model']
-                self.ema_model_state_dict = ckpt['ema_model']
+                self.net_model_state_dict= copy.deepcopy(ckpt['net_model'])
+                self.ema_model_state_dict = copy.deepcopy(ckpt['ema_model'])
                 del ckpt_config
                 del ckpt
                 LOG.info(f"Checkpoint Loaded.")
+                print(f"Checkpoint Loaded.")
             except Exception as e:
                 LOG.info(f"Error {e} while trying to load the checkpoint.")
+                print(f"Error {e} while trying to load the checkpoint.")
+                self.net_model_state_dict = None
+                self.ema_model_state_dict = None
         else:
             self.net_model_state_dict = None
             self.ema_model_state_dict = None
