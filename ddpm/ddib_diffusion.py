@@ -121,7 +121,7 @@ class GaussianDiffusion:
         self.model_var_type = model_var_type
         self.loss_type = loss_type
         self.rescale_timesteps = rescale_timesteps
-
+        self.not_hugginface = True
         # Use float64 for accuracy.
         betas = np.array(betas, dtype=np.float64)
         self.betas = betas
@@ -218,7 +218,7 @@ class GaussianDiffusion:
         return posterior_mean, posterior_variance, posterior_log_variance_clipped
 
     def p_mean_variance(
-            self, model, x, t, clip_denoised=True, denoised_fn=None, model_kwargs=None
+            self, model, x, t, clip_denoised=True,clip_value=1., denoised_fn=None, model_kwargs=None
     ):
         """
         Apply the model to get p(x_{t-1} | x_t), as well as a prediction of
@@ -246,7 +246,10 @@ class GaussianDiffusion:
         B, C = x.shape[:2]
         assert t.shape == (B,)
         attn_maps = []
-        model_output, attn_maps = model(x, t, **model_kwargs)
+        if self.not_hugginface:
+            model_output, attn_maps = model(x, t, **model_kwargs)
+        else:
+            model_output = model(x, t, **model_kwargs).sample
 
         if self.model_var_type in [ModelVarType.LEARNED, ModelVarType.LEARNED_RANGE]:
             assert model_output.shape == (B, C * 2, *x.shape[2:])
@@ -284,7 +287,7 @@ class GaussianDiffusion:
             if denoised_fn is not None:
                 x = denoised_fn(x)
             if clip_denoised:
-                return x.clamp(-1, 1)
+                return x.clamp(-clip_value, clip_value)
             return x
    
         if self.model_mean_type == ModelMeanType.PREVIOUS_X:
@@ -387,6 +390,7 @@ class GaussianDiffusion:
             x,
             t,
             clip_denoised=True,
+            clip_value=1.,
             denoised_fn=None,
             cond_fn=None,
             model_kwargs=None,
@@ -413,6 +417,7 @@ class GaussianDiffusion:
             x,
             t,
             clip_denoised=clip_denoised,
+            clip_value=clip_value,
             denoised_fn=denoised_fn,
             model_kwargs=model_kwargs,
         )
@@ -434,6 +439,7 @@ class GaussianDiffusion:
             shape,
             noise=None,
             clip_denoised=True,
+            clip_value=1.,
             denoised_fn=None,
             cond_fn=None,
             model_kwargs=None,
@@ -464,6 +470,7 @@ class GaussianDiffusion:
                 shape,
                 noise=noise,
                 clip_denoised=clip_denoised,
+                clip_value=clip_value,
                 denoised_fn=denoised_fn,
                 cond_fn=cond_fn,
                 model_kwargs=model_kwargs,
@@ -479,6 +486,7 @@ class GaussianDiffusion:
             shape,
             noise=None,
             clip_denoised=True,
+            clip_value=1.,
             denoised_fn=None,
             cond_fn=None,
             model_kwargs=None,
@@ -514,6 +522,7 @@ class GaussianDiffusion:
                     img,
                     t,
                     clip_denoised=clip_denoised,
+                    clip_value=clip_value,
                     denoised_fn=denoised_fn,
                     cond_fn=cond_fn,
                     model_kwargs=model_kwargs,
@@ -527,6 +536,7 @@ class GaussianDiffusion:
             x,
             t,
             clip_denoised=True,
+            clip_value=1,
             denoised_fn=None,
             cond_fn=None,
             model_kwargs=None,
@@ -541,6 +551,7 @@ class GaussianDiffusion:
             x,
             t,
             clip_denoised=clip_denoised,
+            clip_value=clip_value,
             denoised_fn=denoised_fn,
             model_kwargs=model_kwargs,
         )
@@ -576,19 +587,29 @@ class GaussianDiffusion:
             model,
             x,
             t,
-            clip_denoised=True,
+            clip_value=1.,
+            clip_denoised=False,
             denoised_fn=None,
             cond_fn=None,
             model_kwargs=None,
             eta=0.0,
             epsilon = 0.01,
+            add_noise = True,
             K = 5,
             langevin_step=10,
+            clip_distance = 0,
+            temperature = 1,
+            starting_t = -1,
+            langevin_until = -1,
     ):
         """
         Sample x_{t-1} from the model using DDIM.
         Same usage as p_sample().
         """
+        if starting_t < 0:
+            starting_t = self.num_timesteps
+        if langevin_until <=0 :
+            langevin_until = self.num_timesteps + 1
         device = next(model.parameters()).device
         if self.model_var_type in [ModelVarType.FIXED_LARGE,ModelVarType.FIXED_SMALL]:
             model_variance, model_log_variance = {
@@ -603,56 +624,78 @@ class GaussianDiffusion:
                     self.posterior_log_variance_clipped,
                 ),
             }[self.model_var_type]
-        # print("variance shape",model_variance,model_variance.shape)
-        _, model_variance, model_log_variance = self.q_mean_variance(x, t)
-        # print("original variance shape", model_variance_ori ,model_variance_ori.shape, )
-        # model_variance = model_variance.cpu().squeeze()
-        # model_log_variance = model_log_variance.cpu().squeeze()
-        # model_variance_tensor = _extract_into_tensor(model_variance, t, x.shape)
-        # print("variance tensor",model_variance_tensor,model_variance_tensor.shape)
-        # model_log_variance_tensor = _extract_into_tensor(model_log_variance, t, x.shape)
-        step_0 = th.tensor([0] * x.shape[0], device=device)
-        _,smallest_variance,_ = self.q_mean_variance(x, step_0)
-        # smallest_variance = 0.01^2
-        # smallest_variance = _extract_into_tensor(model_variance, step_0, x.shape)
-        # print("variance",model_variance.mean())
-        # print("smallest_variance", smallest_variance.mean())
-        # else: 
-        #     raise NotImplementedError
+            _, model_variance, model_log_variance = self.q_mean_variance(x, t)
+            step_0 = th.tensor([0] * x.shape[0], device=device)
+            _,smallest_variance,_ = self.q_mean_variance(x, step_0)
+
+        elif self.model_var_type in [ModelVarType.LEARNED, ModelVarType.LEARNED_RANGE]:
+            smallest_variance = 0.01
+
+        else: 
+            raise NotImplementedError
+
         gradient_step_scale = []
         noise_step_scale = []
+        x_start = x
+        intermediate_sample = []
         with th.no_grad():
-            if th.sqrt(model_variance).mean().item() > 0.01 and ((self.num_timesteps - 1 - int(t.float().mean().item())) % langevin_step == 0):
-                # print(f"variance_{int(t.float().mean().item())}",th.sqrt(model_variance).mean().item())
-                alpha_i = epsilon * model_variance / smallest_variance # sigma_i^2 / sigma_end^2 but sigma_end^2 = 1
-                # print(f"alpha_{int(t.float().mean().item())}", alpha_i.mean())
+            if ((starting_t - (1 + int(t.float().mean().item()))) % langevin_step == 0) and \
+                                    (starting_t - (1 + int(t.float().mean().item()))) < (langevin_until + 1):
                 for i in range(K):
                     if model_kwargs is None:
                         model_kwargs = {}
-                    model_output, attn_maps = model(x, t, **model_kwargs)
-                    
-                    # x = (_extract_into_tensor(self.sqrt_alphas_cumprod, t, x_start.shape) * pred_xstart + _extract_into_tensor(self.sqrt_one_minus_alphas_cumprod, t, x_start.shape)* model_output)
+                    if self.not_hugginface:
+                        model_output, attn_maps = model(x, t, **model_kwargs)
+                    else:
+                        model_output = model(x, t, **model_kwargs).sample
+
+                    if self.model_var_type in [ModelVarType.LEARNED, ModelVarType.LEARNED_RANGE]:
+                        B, C = x.shape[:2]
+                        assert model_output.shape == (B, C * 2, *x.shape[2:])
+                        model_output, model_var_values = th.split(model_output, C, dim=1)
+                        
+                        if self.model_var_type == ModelVarType.LEARNED:
+                            model_log_variance = model_var_values
+                            model_variance = th.exp(model_log_variance)
+                        else:
+                            min_log = _extract_into_tensor(
+                                self.posterior_log_variance_clipped, t, x.shape
+                            )
+                            max_log = _extract_into_tensor(np.log(self.betas), t, x.shape)
+                            # The model_var_values is [-1, 1] for [min_var, max_var].
+                            frac = (model_var_values + 1) / 2
+                            model_log_variance = frac * max_log + (1 - frac) * min_log
+                            model_variance = th.clamp(th.exp(model_log_variance), min = smallest_variance)
+
+                    std = th.sqrt(model_variance).mean().item()
+                    alpha_i = epsilon * th.sqrt(model_variance / smallest_variance) # sigma_i^2 / sigma_end^2 but sigma_end^2 = 1
+                    attn_maps = []
                     if clip_denoised:
                         #clipping the predicted x_start then pushing it back to the estimated noise
-                        pred_xstart = (self._predict_xstart_from_eps(x_t=x, t=t, eps=model_output)).clamp(-1,1)
+                        pred_xstart = (self._predict_xstart_from_eps(x_t=x, t=t, eps=model_output)).clamp(-clip_value,clip_value)
                         noise = (x - _extract_into_tensor(self.sqrt_alphas_cumprod, t, pred_xstart.shape) * pred_xstart) /  _extract_into_tensor(self.sqrt_one_minus_alphas_cumprod, t, pred_xstart.shape)
                     else:
                         noise = model_output
-                    x = x - alpha_i * noise / th.sqrt(model_variance)
+                    x_new = x - alpha_i * noise / th.sqrt(model_variance)
                     gradient_step_scale.append(th.abs(alpha_i * noise / th.sqrt(model_variance)).mean().cpu())
-                    if i < K-1:
-                        x = x + th.sqrt(2*alpha_i) * th.randn_like(x)
+                    if add_noise and i < K-1:
+                        x_new = x_new + th.sqrt(2*alpha_i) * temperature * th.randn_like(x)
                         noise_step_scale.append(th.abs(th.sqrt(2*alpha_i) * th.randn_like(x)).mean().cpu())
-                        # if epsilon < 1:
-                    #     x = x +  epsilon * th.randn_like(x) #* th.sqrt(model_variance)
-                    # else:
-                    #     x = x +  np.sqrt(epsilon) * th.randn_like(x) #* th.sqrt(model_variance)
-                
+                    if clip_distance > 0:
+                        norms = th.linalg.norm(th.flatten((x_new-x_start).contiguous(), start_dim =1), dim=1)
+                        valid_updates = (norms < clip_distance*std).float()
+                        valid_updates = valid_updates.unsqueeze(1).unsqueeze(1).unsqueeze(1)
+                        valid_updates = valid_updates.repeat(1, x_new.size(1), x_new.size(2), x_new.size(3))
+                        x = valid_updates * x_new + (1-valid_updates) * x 
+                    else:
+                        x = x_new  
+                    intermediate_sample.append(x.detach().cpu())     
         out = self.p_mean_variance(
             model,
             x,
             t,
             clip_denoised=clip_denoised,
+            clip_value=clip_value,
             denoised_fn=denoised_fn,
             model_kwargs=model_kwargs,
         )
@@ -681,7 +724,9 @@ class GaussianDiffusion:
         )  # no noise when t == 0
         sample = mean_pred + nonzero_mask * sigma * noise
         return {"sample": sample, "pred_xstart": out["pred_xstart"], "attention_maps":out["attention_maps"], 
-                        "gradient_step_scale" : gradient_step_scale, "noise_step_scale" : noise_step_scale}
+                        "gradient_step_scale" : gradient_step_scale, 
+                        "noise_step_scale" : noise_step_scale,
+                        "intermediate_sample":intermediate_sample}
 
     def ddim_sample_loop(
             self,
@@ -689,6 +734,7 @@ class GaussianDiffusion:
             shape,
             noise=None,
             clip_denoised=True,
+            clip_value=1.,
             denoised_fn=None,
             cond_fn=None,
             model_kwargs=None,
@@ -706,6 +752,7 @@ class GaussianDiffusion:
                 shape,
                 noise=noise,
                 clip_denoised=clip_denoised,
+                clip_value=clip_value,
                 denoised_fn=denoised_fn,
                 cond_fn=cond_fn,
                 model_kwargs=model_kwargs,
@@ -722,6 +769,7 @@ class GaussianDiffusion:
             shape,
             noise=None,
             clip_denoised=True,
+            clip_value=1.,
             denoised_fn=None,
             cond_fn=None,
             model_kwargs=None,
@@ -731,7 +779,12 @@ class GaussianDiffusion:
             langevin = False,            
             epsilon = 0.01,
             K = 5,
+            add_noise=True, 
             langevin_step = 10,
+            langevin_until = -1,
+            clip_distance = 0,
+            temperature = 1.,
+            starting_t = -1,
     ):
         """
         Use DDIM to sample from the model and yield intermediate samples from
@@ -745,7 +798,11 @@ class GaussianDiffusion:
             img = noise
         else:
             img = th.randn(*shape, device=device)
-        indices = list(range(self.num_timesteps))[::-1]
+        if starting_t > 0 :
+            indices = list(range(starting_t))[::-1]
+        else:
+            starting_t = self.num_timesteps
+            indices = list(range(self.num_timesteps))[::-1]
 
         if progress:
             # Lazy import so that we don't depend on tqdm.
@@ -762,6 +819,7 @@ class GaussianDiffusion:
                     img,
                     t,
                     clip_denoised=clip_denoised,
+                    clip_value=clip_value,
                     denoised_fn=denoised_fn,
                     cond_fn=cond_fn,
                     model_kwargs=model_kwargs,
@@ -769,6 +827,11 @@ class GaussianDiffusion:
                     epsilon=epsilon,
                     K=K,
                     langevin_step = langevin_step,
+                    clip_distance = clip_distance,
+                    add_noise= add_noise,
+                    temperature = temperature,
+                    starting_t = starting_t,
+                    langevin_until =langevin_until,
                 )   
                 else:
                     out = self.ddim_sample(
@@ -776,6 +839,7 @@ class GaussianDiffusion:
                     img,
                     t,
                     clip_denoised=clip_denoised,
+                    clip_value=clip_value,
                     denoised_fn=denoised_fn,
                     cond_fn=cond_fn,
                     model_kwargs=model_kwargs,
@@ -790,6 +854,7 @@ class GaussianDiffusion:
             x,
             t,
             clip_denoised=True,
+            clip_value=1.,
             denoised_fn=None,
             cond_fn=None,
             model_kwargs=None,
@@ -807,6 +872,7 @@ class GaussianDiffusion:
             x,
             t,
             clip_denoised=clip_denoised,
+            clip_value=clip_value,
             denoised_fn=denoised_fn,
             model_kwargs=model_kwargs,
         )
@@ -833,6 +899,7 @@ class GaussianDiffusion:
             model,
             image,
             clip_denoised=True,
+            clip_value=1.,
             denoised_fn=None,
             cond_fn=None,
             model_kwargs=None,
@@ -848,6 +915,7 @@ class GaussianDiffusion:
                 model,
                 image,
                 clip_denoised=clip_denoised,
+                clip_value=clip_value,
                 denoised_fn=denoised_fn,
                 cond_fn=cond_fn,
                 model_kwargs=model_kwargs,
@@ -863,6 +931,7 @@ class GaussianDiffusion:
             model,
             image,
             clip_denoised=True,
+            clip_value=1.,
             denoised_fn=None,
             cond_fn=None,
             model_kwargs=None,
@@ -892,6 +961,7 @@ class GaussianDiffusion:
                     image,
                     t,
                     clip_denoised=clip_denoised,
+                    clip_value=clip_value,
                     denoised_fn=denoised_fn,
                     cond_fn=cond_fn,
                     model_kwargs=model_kwargs,
@@ -952,7 +1022,7 @@ class GaussianDiffusion:
         x_t = self.q_sample(x_start, t, noise=noise)
 
         terms = {}
-
+        attn_maps = []
         if self.loss_type == LossType.KL or self.loss_type == LossType.RESCALED_KL:
             terms["loss"] = self._vb_terms_bpd(
                 model=model,
@@ -965,7 +1035,10 @@ class GaussianDiffusion:
             if self.loss_type == LossType.RESCALED_KL:
                 terms["loss"] *= self.num_timesteps
         elif self.loss_type == LossType.MSE or self.loss_type == LossType.RESCALED_MSE:
-            model_output, attn_maps = model(x_t, self._scale_timesteps(t), **model_kwargs)
+            if self.not_hugginface:
+                model_output, attn_maps = model(x_t, self._scale_timesteps(t), **model_kwargs).sample
+            else:
+                model_output = model(x, t, **model_kwargs)
             terms["attention_maps"] = attn_maps
             if self.model_var_type in [
                 ModelVarType.LEARNED,

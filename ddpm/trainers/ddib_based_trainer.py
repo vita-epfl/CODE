@@ -11,6 +11,9 @@ import warnings
 import time
 import matplotlib.pyplot as plt
 import gc
+import pickle
+import lpips
+import random
 
 import torch
 import torch.cuda.amp as amp
@@ -22,7 +25,7 @@ from torch.utils.data import Dataset, DataLoader, DistributedSampler
 from torch.distributions.categorical import Categorical
 from torch.nn.utils import clip_grad_value_
 from torch.nn.parallel import DistributedDataParallel
-
+import numpy as np
 import PIL
 import os
 
@@ -86,9 +89,11 @@ def create_dataloader(dataset: Dataset,
                         world_size: int = 1,
                         max_workers: int = 0,
                         batch_size: int = 1,
-                        collate_fn: Optional[Callable] = None):
+                        collate_fn: Optional[Callable] = None,
+                        shuffle=True
+                        ):
 
-    sampler = DistributedSampler(dataset, num_replicas=world_size, rank=rank)
+    sampler = DistributedSampler(dataset, num_replicas=world_size,shuffle=shuffle,rank=rank)
     loader = DataLoader(
         dataset,
         batch_size=batch_size,
@@ -171,7 +176,6 @@ class DDIB_Trainer(BaseTrainer):
 
         self.create_model()
 
-        # self.optimizer = torch.optim.Adam(self.net_model.parameters(), lr=self.cfg.trainer.lr)
         self.optimizer = torch.optim.AdamW(self.mp_trainer.master_params, lr=self.cfg.trainer.lr, weight_decay=self.cfg.trainer.weight_decay)
         if self.cfg.trainer.warmup > 0:
             self.sched = torch.optim.lr_scheduler.LambdaLR(self.optimizer, lr_lambda=self.warmup_lr)
@@ -393,17 +397,6 @@ class DDIB_Trainer(BaseTrainer):
                         img_grid_ddim_ema = wandb.Image(grid_ddim_ema.permute(1,2,0).cpu().numpy())
                         wandb.log({"Sample_DDIM_EMA": img_grid_ddim_ema},commit=False)
 
-                # with torch.no_grad():
-                #     x_0_ddim_ema_noclip = self.spaced_diffusion.ddim_sample_loop(self.ema_model, shape = self.x_T.shape,noise=self.x_T,
-                #                                                 clip_denoised=False,
-                #                                                 progress = self.cfg.trainer.progress)
-                #     grid_ddim_ema_noclip = make_grid(x_0_ddim_ema_noclip)
-                #     path = os.path.join(
-                #         self.cfg.trainer.logdir, 'sample', 'ddim_ema%d.png' % self.step)
-                #     if self.writer is not None:
-                #         img_grid_ddim_ema_noclip = wandb.Image(grid_ddim_ema_noclip.permute(1,2,0).cpu().numpy())
-                #         wandb.log({"Sample_DDIM_EMA_noclipping": img_grid_ddim_ema_noclip},commit=False)
-
             self.ddp_model.train()
             self.ema_model.train()
         if self.writer is not None:
@@ -422,6 +415,191 @@ class DDIB_Trainer(BaseTrainer):
 
             torch.save(ckpt, os.path.join(self.cfg.trainer.logdir, f'ckpt_{self.step}.pt'))
             # torch.save(ckpt, os.path.join(directory, f'ckpt_{self.step}.pt'))
+   
+   
+    @torch.no_grad()
+    def encoding_input(self, inputs):
+        self.ema_model.eval()
+        while len(inputs.shape)<4:
+            inputs = inputs.unsqueeze(0)
+        reversing_inputs = inputs.cuda(self.cfg.trainer.gpu)
+        reverse_encoding = self.ode_diffusion.ddim_reverse_sample_loop_progressive(self.ema_model,reversing_inputs,
+                                                                                    clip_denoised=True, eta=0.)
+        ddpm_of_reencoded_tensor = []
+        with torch.no_grad():
+            for dic in tqdm(reverse_encoding):
+                ddpm_of_reencoded_tensor.append(dic['sample'].cpu())
+        
+        seed = ddpm_of_reencoded_tensor[-1].cuda(self.cfg.trainer.gpu)
+        return seed
+    
+    
+    @torch.no_grad()
+    def ODEdit(self, encoded_inputs , number_of_sample=2, K=100, langevin_step=100, epsilon=1e-6, temperature = 1/3):
+        self.ema_model.eval()
+        seed = encoded_inputs.cuda(self.cfg.trainer.gpu).repeat_interleave(number_of_sample,dim=0)
+        ddpm_imagenet_sample = self.ode_diffusion.ddim_sample_loop_progressive(self.ema_model,[number_of_sample*encoded_inputs.shape[0],3,64,64], 
+                                                                                clip_denoised=True,
+                                                                                noise=seed,
+                                                                                eta = 0., 
+                                                                                langevin=True,
+                                                                                add_noise=True,
+                                                                                temperature=temperature, 
+                                                                                epsilon=epsilon, 
+                                                                                K=K, 
+                                                                                langevin_step = langevin_step, 
+                                                                                clip_distance=0.)
+        ddpm_of_post_resampled_tensor = []
+        with torch.no_grad():
+            for dic in tqdm(ddpm_imagenet_sample):
+                ddpm_of_post_resampled_tensor.append(dic['sample'].cpu())
+        return ddpm_of_post_resampled_tensor
+
+
+    @torch.no_grad()
+    def run_metrics(self,number_of_test_per_corruption = 19000,random_corruption = False, batch_size = 20,number_of_sample=1,  number_of_encoding_decoding = 1):
+        self.ema_model.eval()
+        # loss_fn_vgg = lpips.LPIPS(net='vgg')
+
+        corruptions_list = ['spatter', "motion_blur", "frost","speckle_noise","impulse_noise","shot_noise","jpeg_compression","pixelate","brightness",
+                            "fog","saturate","gaussian_noise",'elastic_transform','snow','masking_vline_random_color','masking_gaussian','glass_blur','gaussian_blur','contrast']
+        
+        corruption_severity  = 4
+        K_langevin_steps = 120
+        langevin_interval = 24
+        epsilon_langevin = 1e-6
+        
+        stop_iteration_at = int(number_of_test_per_corruption/(batch_size*self.cfg.trainer.world_size))+1
+        
+        print("stop_iteration_at", stop_iteration_at)
+        add_index_per_gpu = self.cfg.trainer.gpu*stop_iteration_at*batch_size
+        print(f"On GPU {self.cfg.trainer.gpu} start index:", add_index_per_gpu)
+        if random_corruption:
+            directory_results = f"/mnt/scitas/bastien/ODE_xp/random_corruption/metrics_new/"
+            directory_reconstruction =  f"/mnt/scitas/bastien/ODE_xp/random_corruption/reconstruction_new/"
+            directory_inputs = f"/mnt/scitas/bastien/ODE_xp/random_corruption/inputs_new/"
+            directory_targets = f"/mnt/scitas/bastien/ODE_xp/random_corruption/targets_new/"
+            os.makedirs(directory_reconstruction, exist_ok=True)
+            os.makedirs(directory_inputs, exist_ok=True)
+            os.makedirs(directory_results, exist_ok=True)
+            os.makedirs(directory_targets, exist_ok=True)
+            for i in tqdm(range(stop_iteration_at)):
+                try:
+                    corruption = random.choice(corruptions_list)
+                    cfg = self.cfg
+                    with open_dict(cfg):
+                        cfg.trainer.corruption = corruption
+                        cfg.trainer.corruption_severity = corruption_severity
+                        cfg.split = "test"
+                    _ , test_dataset = get_dataset(None, cfg)
+                    test_dataloader = create_dataloader(
+                        test_dataset,
+                        rank=cfg.trainer.rank,
+                        max_workers=cfg.trainer.num_workers,
+                        world_size=cfg.trainer.world_size,
+                        batch_size=batch_size,
+                        shuffle = True,
+                        )
+                    z = np.random.randint(len(test_dataloader))
+                    for k, batch in enumerate(test_dataloader):
+                        if k != z:
+                            continue
+                        inputs, targets = batch
+                        inputs_normalized = inputs/2 +0.5
+                        targets_normalized = targets/2 + 0.5
+                        for n in range(len(inputs_normalized)):
+                            save_image(inputs_normalized[n],directory_inputs+f"input_{i*batch_size+n+add_index_per_gpu}.png")
+                            save_image(targets_normalized[n],directory_targets+f"target_{i*batch_size+n+add_index_per_gpu}.png")
+                        inputs = inputs.cuda(self.cfg.trainer.gpu)
+                        targets = targets.cuda(self.cfg.trainer.gpu)
+                        encoded_inputs = self.encoding_input(inputs)
+                        ddpm_of_post_resampled_tensor = self.ODEdit(encoded_inputs , number_of_sample=number_of_sample, K=K_langevin_steps, langevin_step=langevin_interval, 
+                                                                    epsilon=epsilon_langevin, temperature = 1/2)
+                        results = ddpm_of_post_resampled_tensor[-1]
+                        results_normalized = results/2 + 0.5
+                        if number_of_sample > 1:
+                            results_per_image = results_normalized.split(number_of_sample, dim=0)
+                            for n, same_images in enumerate(results_per_image):
+                                for image_i in range(len(same_images)):
+                                    save_image(same_images[image_i], directory_reconstruction+f"reconstruction_{i*batch_size+n+add_index_per_gpu}_{image_i}.png")
+                        else:
+                            results_per_image = results_normalized
+                            for n, same_images in enumerate(results_per_image):
+                                save_image(same_images, directory_reconstruction+f"reconstruction_{i*batch_size+n+add_index_per_gpu}_{0}.png")
+                        break
+                except Exception as e:
+                    print(f"Error in step {i}, gpu {self.cfg.trainer.gpu}")
+                    print(e)
+                    continue
+        else:
+            for corruption in corruptions_list:
+                if True:
+                # for corruption_severity in corruptions_severities: 
+                    directory_results = f"/mnt/scitas/bastien/ODE_xp/severity_{corruption_severity}/{corruption}/metrics/"
+                    directory_reconstruction =  f"/mnt/scitas/bastien/ODE_xp/severity_{corruption_severity}/{corruption}/reconstruction/"
+                    directory_inputs = f"/mnt/scitas/bastien/ODE_xp/severity_{corruption_severity}/{corruption}/inputs/"
+                    directory_targets = f"/mnt/scitas/bastien/ODE_xp/severity_{corruption_severity}/{corruption}/targets/"
+                    os.makedirs(directory_reconstruction, exist_ok=True)
+                    os.makedirs(directory_inputs, exist_ok=True)
+                    os.makedirs(directory_results, exist_ok=True)
+                    os.makedirs(directory_targets, exist_ok=True)
+                    cfg = self.cfg
+                    with open_dict(cfg):
+                        cfg.trainer.corruption = corruption
+                        cfg.trainer.corruption_severity = corruption_severity
+                        cfg.split = "test"
+                    _ , test_dataset = get_dataset(None, cfg)
+                    LOG.info(f"train dataset length {len(self.test_dataset)}")
+                    test_dataloader = create_dataloader(
+                        test_dataset,
+                        rank=cfg.trainer.rank,
+                        max_workers=cfg.trainer.num_workers,
+                        world_size=cfg.trainer.world_size,
+                        batch_size=batch_size,
+                        shuffle = False,
+                        )
+                    if stop_iteration_at >= len(test_dataloader):
+                        stop_iteration_at = len(test_dataloader) -1
+                    for i, batch in enumerate(test_dataloader):
+                        if i >= stop_iteration_at:
+                            break
+                        inputs, targets = batch
+                        inputs_normalized = inputs/2 +0.5
+                        targets_normalized = targets/2 + 0.5
+                        for n in range(len(inputs_normalized)):
+                            save_image(inputs_normalized[n],directory_inputs+f"input_{i*batch_size+n+add_index_per_gpu}.png")
+                            save_image(targets_normalized[n],directory_targets+f"target_{i*batch_size+n+add_index_per_gpu}.png")
+                        inputs = inputs.cuda(self.cfg.trainer.gpu)
+                        targets = targets.cuda(self.cfg.trainer.gpu)
+                        encoded_inputs = self.encoding_input(inputs)
+                        ddpm_of_post_resampled_tensor = self.ODEdit(encoded_inputs , number_of_sample=number_of_sample, K=K_langevin_steps, 
+                                                                    langevin_step=langevin_interval, epsilon=epsilon_langevin, temperature = 1/3)
+                        results = ddpm_of_post_resampled_tensor[-1]
+                        results_normalized = results/2 + 0.5
+                        results_per_image = results_normalized.split(number_of_sample, dim=0)
+                        if number_of_sample > 1:
+                            results_per_image = results_normalized.split(number_of_sample, dim=0)
+                            for n, same_images in enumerate(results_per_image):
+                                for image_i in range(len(same_images)):
+                                    save_image(same_images[image_i], directory_reconstruction+f"reconstruction_{i*batch_size+n+add_index_per_gpu}_{image_i}.png")
+                        else:
+                            results_per_image = results_normalized
+                            for n, same_images in enumerate(results_per_image):
+                                save_image(same_images, directory_reconstruction+f"reconstruction_{i*batch_size+n+add_index_per_gpu}_{0}.png")
+                        # for n, same_images in enumerate(results_per_image):
+                        #     for image_i in range(len(same_images)):
+                        #         save_image(same_images[image_i], directory_reconstruction+f"reconstruction_{i*batch_size+n+add_index_per_gpu}_{image_i}.png")
+                        if self.cfg.trainer.gpu == 0 and i % 1000 == 0:
+                            grid_targets = make_grid(targets_normalized)
+                            grid_source = make_grid(inputs_normalized)
+                            grid_results= make_grid(results)
+                            img_grid_ddim_reconstruction = wandb.Image(grid_targets.permute(1,2,0).cpu().numpy())
+                            wandb.log({"Original Sample": img_grid_ddim_reconstruction},commit=False)
+                            img_grid_ddim_reconstruction_batch = wandb.Image(grid_source.permute(1,2,0).cpu().numpy())
+                            wandb.log({"Source Sample": img_grid_ddim_reconstruction_batch},commit=False)
+                            img_grid_ddim_reconstruction_test_batch = wandb.Image(grid_results.permute(1,2,0).cpu().numpy())
+                            wandb.log({"Reconstruction Results": img_grid_ddim_reconstruction_test_batch},commit=True)
+
 
     def log_and_save_images(self, image_batch,corruption="",corruption_severity=-1, K=0, epsilon = -1,step = 0, loop = -1, gpu = 0, commit = True):
         image_batch = ((image_batch/2)+0.5)
@@ -437,7 +615,6 @@ class DDIB_Trainer(BaseTrainer):
         save_image(grid, path)
         img_grid = wandb.Image(grid.permute(1,2,0).numpy())
         wandb.log({title: img_grid},commit=commit)
-        
         
 
     @torch.no_grad()
@@ -608,6 +785,12 @@ class DDIB_Trainer(BaseTrainer):
                                 loss_type=self.loss_type,
                                 rescale_timesteps=False,
                             )
+        self.ode_diffusion = SpacedDiffusion(use_timesteps=space_timesteps(self.cfg.trainer.num_timesteps, "ddim100"),
+                                betas=self.betas,
+                                model_mean_type=self.model_mean_type,
+                                model_var_type=self.model_var_type,
+                                loss_type=self.loss_type,
+                                rescale_timesteps=False,)
 
 
     def create_diffusion_imagenet_256(self):

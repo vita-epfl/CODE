@@ -3,7 +3,7 @@ import torch
 from scipy import linalg
 from tqdm import tqdm
 from torch.nn.functional import adaptive_avg_pool2d
-
+from torchvision.transforms import Resize
 from .inception import InceptionV3
 
 
@@ -142,8 +142,8 @@ def calculate_frechet_distance(mu1, sigma1, mu2, sigma2, eps=1e-6,
     return out
 
 
-def get_statistics(images, num_images=None, batch_size=50, use_torch=False,
-                   verbose=False, parallel=False):
+def get_statistics(images, num_images=None, card_image=None, batch_size=50, use_torch=False,
+                   verbose=False, parallel=False, normalize = False):
     """when `images` is a python generator, `num_images` should be given"""
 
     if num_images is None:
@@ -155,7 +155,7 @@ def get_statistics(images, num_images=None, batch_size=50, use_torch=False,
                 "`num_images` should be given")
 
     block_idx1 = InceptionV3.BLOCK_INDEX_BY_DIM[2048]
-    model = InceptionV3([block_idx1]).to(device)
+    model = InceptionV3([block_idx1],normalize_input = normalize).to(device)
     model.eval()
 
     if parallel:
@@ -175,13 +175,23 @@ def get_statistics(images, num_images=None, batch_size=50, use_torch=False,
     while True:
         batch_images = []
         # get a batch of images from iterator
-        try:
-            for _ in range(batch_size):
-                batch_images.append(next(iterator))
-        except StopIteration:
-            if len(batch_images) == 0:
-                break
-            pass
+        if card_image is None:
+            try:
+                for _ in range(batch_size):
+                        batch_images.append(next(iterator))
+            except StopIteration:
+                if len(batch_images) == 0:
+                    break
+                pass
+        else:
+            try:
+                for _ in range(batch_size):
+                    sampled_images = next(iterator)
+                    batch_images.append(sampled_images[card_image])
+            except StopIteration:
+                if len(batch_images) == 0:
+                    break
+                pass
         batch_images = np.stack(batch_images, axis=0)
         end = start + len(batch_images)
 

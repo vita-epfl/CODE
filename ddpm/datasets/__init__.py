@@ -9,7 +9,7 @@ from ddpm.datasets.cityscape import Cityscapes_Pretraining_Dataset, Cityscapes
 from ddpm.datasets.celeba import CelebA
 from ddpm.datasets.ffhq import FFHQ
 from ddpm.datasets.lsun import LSUN
-from ddpm.datasets.audio import AudioDataset
+# from ddpm.datasets.audio import AudioDataset
 from ddpm.datasets.gta5 import GTA_Pretraining_Dataset
 from ddpm.datasets.imagenet import Imagenet_Dataset
 from torch.utils.data import Subset
@@ -136,11 +136,11 @@ def get_dataset(args, cfg):
             ),
             download=False,
         )
-    elif dataset_name == "MAESTRO":
-        dataset = AudioDataset(cfg)
-        if dataset.should_build_dataset():
-            dataset.build_collated()
-        test_dataset = None
+    # elif dataset_name == "MAESTRO":
+    #     dataset = AudioDataset(cfg)
+    #     if dataset.should_build_dataset():
+    #         dataset.build_collated()
+    #     test_dataset = None
 
     elif dataset_name == "CITYSCAPES_ORIGINAL":
         if cfg.dataset.mode == "fine":

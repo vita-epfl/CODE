@@ -7,17 +7,21 @@ readme = "README.md"
 
 [tool.poetry.dependencies]
 python = ">=3.8"
-torch = "^1.11.0"
-torchaudio = "^0.11.0"
-torchvision = "^0.12.0"
-wandb = "^0.14.2"
+torch = ">=1.12.0"
+torchaudio = ">=0.11.0"
+torchvision = ">=0.12.0"
+wandb = ">=0.14.2"
 torchgeometry = "^0.1.2"
 timm = "^0.6.13"
 tqdm = "^4.64.0"
 tensorboard = "^2.12.2"
-scikit-image = "0.19.3"
+scikit-image = ">=0.19.3"
 Wand = "0.6.11"
 lmdb = "1.4.0"
+transformers = ">=4.31.0"
+diffusers = ">=0.17"
+protobuf = "^4.24.3"
+accelerate = "^0.23.0"
 
 [tool.poetry.group.dev.dependencies]
 submitit = "^1.4.5"
@@ -33,6 +37,7 @@ omegaconf = "^2.3.0"
 Pillow = "^9.5.0"
 opencv-python = "^4.7.0.72"
 matplotlib = "^3.7.1"
+jupyter = "^1.0.0"
 
 [build-system]
 requires = ["poetry-core"]
