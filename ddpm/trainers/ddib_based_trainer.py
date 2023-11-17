@@ -468,7 +468,7 @@ class DDIB_Trainer(BaseTrainer):
         K_langevin_steps = 120
         langevin_interval = 24
         epsilon_langevin = 1e-6
-        
+        temperature = 1/2
         stop_iteration_at = int(number_of_test_per_corruption/(batch_size*self.cfg.trainer.world_size))+1
         
         print("stop_iteration_at", stop_iteration_at)
@@ -514,7 +514,7 @@ class DDIB_Trainer(BaseTrainer):
                         targets = targets.cuda(self.cfg.trainer.gpu)
                         encoded_inputs = self.encoding_input(inputs)
                         ddpm_of_post_resampled_tensor = self.ODEdit(encoded_inputs , number_of_sample=number_of_sample, K=K_langevin_steps, langevin_step=langevin_interval, 
-                                                                    epsilon=epsilon_langevin, temperature = 1/2)
+                                                                    epsilon=epsilon_langevin, temperature = temperature)
                         results = ddpm_of_post_resampled_tensor[-1]
                         results_normalized = results/2 + 0.5
                         if number_of_sample > 1:
@@ -573,7 +573,7 @@ class DDIB_Trainer(BaseTrainer):
                         targets = targets.cuda(self.cfg.trainer.gpu)
                         encoded_inputs = self.encoding_input(inputs)
                         ddpm_of_post_resampled_tensor = self.ODEdit(encoded_inputs , number_of_sample=number_of_sample, K=K_langevin_steps, 
-                                                                    langevin_step=langevin_interval, epsilon=epsilon_langevin, temperature = 1/3)
+                                                                    langevin_step=langevin_interval, epsilon=epsilon_langevin, temperature = temperature)
                         results = ddpm_of_post_resampled_tensor[-1]
                         results_normalized = results/2 + 0.5
                         results_per_image = results_normalized.split(number_of_sample, dim=0)

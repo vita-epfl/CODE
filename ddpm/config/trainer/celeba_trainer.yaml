@@ -6,6 +6,7 @@ type: cityscape
 
 train: True #train from scratch
 eval: False #load ckpt.pt and evaluate FID and IS
+test_session: True
 # Dataset
 datapath: /mnt/scitas/bastien/ #help='dataset path if downloaded
 dataset: CELEBA #help='dataset name')
@@ -58,6 +59,7 @@ ema_decay: 0.999 #help="ema decay rate")
 weight_decay: 0.01
 fp16_scale_growth: 1e-3
 use_fp16: False
+offset_training: True
 
 #Mixed Precision
 use_half_for_matmul: False
@@ -67,13 +69,13 @@ use_half_precision: False
 # Logging & Sampling
 logdir: /mnt/scitas/bastien/logs/Celeba #help='log directory')
 wandb_entity: bastienvd #help='wandb id to use')
-sample_size: 8 #"sampling size of images")
+sample_size: 4 #"sampling size of images")
 sample_step: 10000 #help='frequency of sampling')
 ml_exp_name: ${trainer.dataset}_${trainer.corruption}_x${trainer.img_size} #help = 'name of the experience on wandb')
-checkpointpath: #/mnt/scitas/bastien/logs/Audio/ckpt_350000.pt
+checkpointpath: /mnt/scitas/bastien/logs/Celeba/CELEBA_None_x64_2023-08-08_01-41/ckpt_170000.pt
 load_imagenet_256_ckpt: False
 imagenet_256_ckpt: /mnt/scitas/bastien/imagenet_diffusion/256x256_diffusion_uncond.pt
-timesteps_respacing: ddim50
+timesteps_respacing: ddim100
 clip_denoised: False
 progress: False
 

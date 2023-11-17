@@ -11,7 +11,7 @@ import torch as th
 import time
 from ddpm.ddib_utils import normal_kl, discretized_gaussian_log_likelihood, mean_flat
 
-
+import matplotlib.pyplot as plt
 
 def get_named_beta_schedule(schedule_name, num_diffusion_timesteps):
     """
@@ -589,12 +589,12 @@ class GaussianDiffusion:
             t,
             clip_value=1.,
             clip_denoised=False,
+            clip_denoised_pred = True,
             denoised_fn=None,
             cond_fn=None,
             model_kwargs=None,
             eta=0.0,
             epsilon = 0.01,
-            add_noise = True,
             K = 5,
             langevin_step=10,
             clip_distance = 0,
@@ -606,41 +606,51 @@ class GaussianDiffusion:
         Sample x_{t-1} from the model using DDIM.
         Same usage as p_sample().
         """
-        if starting_t < 0:
-            starting_t = self.num_timesteps
-        if langevin_until <=0 :
-            langevin_until = self.num_timesteps + 1
         device = next(model.parameters()).device
-        if self.model_var_type in [ModelVarType.FIXED_LARGE,ModelVarType.FIXED_SMALL]:
-            model_variance, model_log_variance = {
-                # for fixedlarge, we set the initial (log-)variance like so
-                # to get a better decoder log likelihood.
-                ModelVarType.FIXED_LARGE: (
-                    np.append(self.posterior_variance[1], self.betas[1:]),
-                    np.log(np.append(self.posterior_variance[1], self.betas[1:])),
-                ),
-                ModelVarType.FIXED_SMALL: (
-                    self.posterior_variance,
-                    self.posterior_log_variance_clipped,
-                ),
-            }[self.model_var_type]
-            _, model_variance, model_log_variance = self.q_mean_variance(x, t)
-            step_0 = th.tensor([0] * x.shape[0], device=device)
-            _,smallest_variance,_ = self.q_mean_variance(x, step_0)
+        # if self.model_var_type in [ModelVarType.FIXED_LARGE,ModelVarType.FIXED_SMALL]:
+        #     model_variance, model_log_variance = {
+        #         # for fixedlarge, we set the initial (log-)variance like so
+        #         # to get a better decoder log likelihood.
+        #         ModelVarType.FIXED_LARGE: (
+        #             np.append(self.posterior_variance[1], self.betas[1:]),
+        #             np.log(np.append(self.posterior_variance[1], self.betas[1:])),
+        #         ),
+        #         ModelVarType.FIXED_SMALL: (
+        #             self.posterior_variance,
+        #             self.posterior_log_variance_clipped,
+        #         ),
+        #     }[self.model_var_type]
+            # _, model_variance, model_log_variance = self.q_mean_variance(x, t)
+            # model_variance_t = _extract_into_tensor(model_variance, t, x.shape)
+            
+            # model_variance_3 = _extract_into_tensor(model_variance, t+1, x.shape)
+            
+            # print(f"Model variance 2 {model_variance_2.mean()}")
+            # print(f"Model variance t+1 {model_variance_3.mean()}")
+        _,model_variance_t,_ = self.q_mean_variance(x, t)
+        alpha_bar_prev = _extract_into_tensor(self.alphas_cumprod_prev, t, x.shape)
+        std = th.sqrt(1 - alpha_bar_prev)
+        # print(f"Model variance at {t.item()} {model_variance_t.mean()}")
+        # print(f"Full var {model_variance}")
+        step_0 = th.tensor([0] * x.shape[0], device=device)
+        # smallest_variance = _extract_into_tensor(model_variance, step_0, x.shape)
 
-        elif self.model_var_type in [ModelVarType.LEARNED, ModelVarType.LEARNED_RANGE]:
-            smallest_variance = 0.01
+        _,smallest_variance,_ = self.q_mean_variance(x, step_0)
+        # smallest_variance = model_variance[1:].min()
+        # print(f"Smallest var : {smallest_variance} vs {smallest_variance_2}")
+        # elif self.model_var_type in [ModelVarType.LEARNED, ModelVarType.LEARNED_RANGE]:
+        #     smallest_variance = 0.0001
 
-        else: 
-            raise NotImplementedError
-
+        # else: 
+        #     raise NotImplementedError
+        # print(f" Alpha_{t.item()} : {epsilon * (model_variance_t / smallest_variance).mean()} ")
         gradient_step_scale = []
         noise_step_scale = []
         x_start = x
         intermediate_sample = []
         with th.no_grad():
-            if ((starting_t - (1 + int(t.float().mean().item()))) % langevin_step == 0) and \
-                                    (starting_t - (1 + int(t.float().mean().item()))) < (langevin_until + 1):
+            if (t[0] - starting_t) % langevin_step == 0 and std.mean() > 1e-4:
+                print(f"Performing {K} langevin updates at step t {t}")
                 for i in range(K):
                     if model_kwargs is None:
                         model_kwargs = {}
@@ -649,7 +659,7 @@ class GaussianDiffusion:
                     else:
                         model_output = model(x, t, **model_kwargs).sample
 
-                    if self.model_var_type in [ModelVarType.LEARNED, ModelVarType.LEARNED_RANGE]:
+                    if  i == 0 and self.model_var_type in [ModelVarType.LEARNED, ModelVarType.LEARNED_RANGE]:
                         B, C = x.shape[:2]
                         assert model_output.shape == (B, C * 2, *x.shape[2:])
                         model_output, model_var_values = th.split(model_output, C, dim=1)
@@ -665,64 +675,71 @@ class GaussianDiffusion:
                             # The model_var_values is [-1, 1] for [min_var, max_var].
                             frac = (model_var_values + 1) / 2
                             model_log_variance = frac * max_log + (1 - frac) * min_log
-                            model_variance = th.clamp(th.exp(model_log_variance), min = smallest_variance)
+                            model_variance_t = th.clamp(th.exp(model_log_variance), min = smallest_variance)
 
-                    std = th.sqrt(model_variance).mean().item()
-                    alpha_i = epsilon * th.sqrt(model_variance / smallest_variance) # sigma_i^2 / sigma_end^2 but sigma_end^2 = 1
+                    # std = th.sqrt(model_variance_t).mean().item()
+                    alpha_i = th.tensor(epsilon).to(device) # (model_variance_t / smallest_variance)
+                        # sigma_i^2 / sigma_end^2 but sigma_end^2 = 1
                     attn_maps = []
+
                     if clip_denoised:
                         #clipping the predicted x_start then pushing it back to the estimated noise
                         pred_xstart = (self._predict_xstart_from_eps(x_t=x, t=t, eps=model_output)).clamp(-clip_value,clip_value)
                         noise = (x - _extract_into_tensor(self.sqrt_alphas_cumprod, t, pred_xstart.shape) * pred_xstart) /  _extract_into_tensor(self.sqrt_one_minus_alphas_cumprod, t, pred_xstart.shape)
                     else:
                         noise = model_output
-                    x_new = x - alpha_i * noise / th.sqrt(model_variance)
-                    gradient_step_scale.append(th.abs(alpha_i * noise / th.sqrt(model_variance)).mean().cpu())
-                    if add_noise and i < K-1:
+                    x_new = x - alpha_i  * noise / std
+                    gradient_step_scale.append(th.abs(alpha_i * noise / th.sqrt(model_variance_t)).mean().cpu())
+
+                    if i < K-1:
                         x_new = x_new + th.sqrt(2*alpha_i) * temperature * th.randn_like(x)
                         noise_step_scale.append(th.abs(th.sqrt(2*alpha_i) * th.randn_like(x)).mean().cpu())
-                    if clip_distance > 0:
-                        norms = th.linalg.norm(th.flatten((x_new-x_start).contiguous(), start_dim =1), dim=1)
-                        valid_updates = (norms < clip_distance*std).float()
-                        valid_updates = valid_updates.unsqueeze(1).unsqueeze(1).unsqueeze(1)
-                        valid_updates = valid_updates.repeat(1, x_new.size(1), x_new.size(2), x_new.size(3))
-                        x = valid_updates * x_new + (1-valid_updates) * x 
-                    else:
-                        x = x_new  
-                    intermediate_sample.append(x.detach().cpu())     
-        out = self.p_mean_variance(
-            model,
-            x,
-            t,
-            clip_denoised=clip_denoised,
-            clip_value=clip_value,
-            denoised_fn=denoised_fn,
-            model_kwargs=model_kwargs,
-        )
-        if cond_fn is not None:
-            out = self.condition_score(cond_fn, out, x, t, model_kwargs=model_kwargs)
+                    x = x_new
+                    intermediate_sample.append(x.detach().cpu())   
+                     
 
-        # Usually our model outputs epsilon, but we re-derive it
-        # in case we used x_start or x_prev prediction.
-        eps = self._predict_eps_from_xstart(x, t, out["pred_xstart"])
+                image_pre_langevin = x_start.data.cpu()[0].permute(1,2,0) / 2 + 0.5
+                plt.imshow(image_pre_langevin)
+                plt.title(f"Image Before_langevin {t}")
+                plt.show()
+                image_retouched = x.data.cpu()[0].permute(1,2,0) / 2 + 0.5
+                plt.imshow(image_retouched)
+                plt.title(f"Image Post_langevin {t}")
+                plt.show()
 
-        alpha_bar = _extract_into_tensor(self.alphas_cumprod, t, x.shape)
-        alpha_bar_prev = _extract_into_tensor(self.alphas_cumprod_prev, t, x.shape)
-        sigma = (
-                eta
-                * th.sqrt((1 - alpha_bar_prev) / (1 - alpha_bar))
-                * th.sqrt(1 - alpha_bar / alpha_bar_prev)
-        )
-        # Equation 12.
-        noise = th.randn_like(x)
-        mean_pred = (
-                out["pred_xstart"] * th.sqrt(alpha_bar_prev)
-                + th.sqrt(1 - alpha_bar_prev - sigma ** 2) * eps
-        )
-        nonzero_mask = (
-            (t != 0).float().view(-1, *([1] * (len(x.shape) - 1)))
-        )  # no noise when t == 0
-        sample = mean_pred + nonzero_mask * sigma * noise
+            out = self.p_mean_variance(
+                model,
+                x,
+                t,
+                clip_denoised=clip_denoised_pred,
+                clip_value=clip_value,
+                denoised_fn=denoised_fn,
+                model_kwargs=model_kwargs,
+            )
+            if cond_fn is not None:
+                out = self.condition_score(cond_fn, out, x, t, model_kwargs=model_kwargs)
+
+            # Usually our model outputs epsilon, but we re-derive it
+            # in case we used x_start or x_prev prediction.
+            eps = self._predict_eps_from_xstart(x, t, out["pred_xstart"])
+
+            alpha_bar = _extract_into_tensor(self.alphas_cumprod, t, x.shape)
+            alpha_bar_prev = _extract_into_tensor(self.alphas_cumprod_prev, t, x.shape)
+            sigma = (
+                    eta
+                    * th.sqrt((1 - alpha_bar_prev) / (1 - alpha_bar))
+                    * th.sqrt(1 - alpha_bar / alpha_bar_prev)
+            )
+            # Equation 12.
+            noise = th.randn_like(x)
+            mean_pred = (
+                    out["pred_xstart"] * th.sqrt(alpha_bar_prev)
+                    + th.sqrt(1 - alpha_bar_prev - sigma ** 2) * eps
+            )
+            nonzero_mask = (
+                (t != 0).float().view(-1, *([1] * (len(x.shape) - 1)))
+            )  # no noise when t == 0
+            sample = mean_pred + nonzero_mask * sigma * noise
         return {"sample": sample, "pred_xstart": out["pred_xstart"], "attention_maps":out["attention_maps"], 
                         "gradient_step_scale" : gradient_step_scale, 
                         "noise_step_scale" : noise_step_scale,
@@ -768,7 +785,8 @@ class GaussianDiffusion:
             model,
             shape,
             noise=None,
-            clip_denoised=True,
+            clip_denoised=False,
+            clip_denoised_pred=True, 
             clip_value=1.,
             denoised_fn=None,
             cond_fn=None,
@@ -779,12 +797,12 @@ class GaussianDiffusion:
             langevin = False,            
             epsilon = 0.01,
             K = 5,
-            add_noise=True, 
             langevin_step = 10,
             langevin_until = -1,
             clip_distance = 0,
             temperature = 1.,
             starting_t = -1,
+            
     ):
         """
         Use DDIM to sample from the model and yield intermediate samples from
@@ -799,7 +817,8 @@ class GaussianDiffusion:
         else:
             img = th.randn(*shape, device=device)
         if starting_t > 0 :
-            indices = list(range(starting_t))[::-1]
+            starting_t = min(starting_t,self.num_timesteps-1)
+            indices = list(range(starting_t+1))[::-1]
         else:
             starting_t = self.num_timesteps
             indices = list(range(self.num_timesteps))[::-1]
@@ -819,6 +838,7 @@ class GaussianDiffusion:
                     img,
                     t,
                     clip_denoised=clip_denoised,
+                    clip_denoised_pred=clip_denoised_pred,
                     clip_value=clip_value,
                     denoised_fn=denoised_fn,
                     cond_fn=cond_fn,
@@ -828,7 +848,6 @@ class GaussianDiffusion:
                     K=K,
                     langevin_step = langevin_step,
                     clip_distance = clip_distance,
-                    add_noise= add_noise,
                     temperature = temperature,
                     starting_t = starting_t,
                     langevin_until =langevin_until,
