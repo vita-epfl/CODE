@@ -29,7 +29,8 @@ def main(cfg: DictConfig) -> int:
         LOG.info(f"Output directory {cfg.trainer.logdir}/{cfg.trainer.sync_key}")
         trainer.setup_platform()
         trainer.setup_trainer()
-        trainer.run_metrics()
+        trainer.run_sdeedit()
+        # trainer.run_metrics()
         return 0
     else:
         raise NotImplementedError

@@ -44,6 +44,7 @@ from ddpm.ddib_utils import *
 from ddpm.utils.utils import image_align, compute_psnr, compute_ssim, proc_metrics
 from ddpm.ddib_samplers import LossAwareSampler, UniformSampler, create_named_schedule_sampler
 from ddpm.fp_16_utils import MixedPrecisionTrainer
+from ddpm.sde.sdelib import load_model, SDEditing
 import wandb
 
 LOG = logging.getLogger(__name__)
@@ -455,6 +456,76 @@ class DDIB_Trainer(BaseTrainer):
                 ddpm_of_post_resampled_tensor.append(dic['sample'].cpu())
         return ddpm_of_post_resampled_tensor
 
+    @torch.no_grad()
+    def run_sdeedit(self, number_of_test_per_corruption = 15000,random_corruption = True, batch_size = 36, celebahq = False):
+        corruptions_list = ['spatter', "motion_blur", "frost","speckle_noise","impulse_noise","shot_noise","jpeg_compression","pixelate","brightness",
+                            "fog","saturate","gaussian_noise",'elastic_transform','snow','masking_vline_random_color','masking_gaussian','glass_blur','gaussian_blur','contrast']
+        
+        corruption_severity  = 4
+        stop_iteration_at = int(number_of_test_per_corruption/(batch_size*self.cfg.trainer.world_size))+1
+        print("stop_iteration_at", stop_iteration_at)
+        add_index_per_gpu = self.cfg.trainer.gpu*stop_iteration_at*batch_size
+        print(f"On GPU {self.cfg.trainer.gpu} start index:", add_index_per_gpu)
+
+        sample_step = 1
+        if celebahq:
+            model, betas, num_timesteps, logvar = load_model(device=f"cuda:{self.cfg.trainer.gpu}")
+        else:
+            model = self.ema_model
+            betas = th.from_numpy(self.diffusion.betas)
+            alphas = (1.0 - betas).numpy()
+            alphas_cumprod = np.cumprod(alphas, axis=0)
+            alphas_cumprod_prev = np.append(1.0, alphas_cumprod[:-1])
+            posterior_variance = betas * \
+                (1.0 - alphas_cumprod_prev) / (1.0 - alphas_cumprod)
+            logvar = np.log(np.maximum(posterior_variance, 1e-20))
+            num_timesteps = int(betas.shape[0])
+
+        for noise_levels in range(200,800,100):
+            directory_reconstruction =  f"/mnt/scitas/bastien/SDE_xp/random_corruption/reconstruction_{noise_levels}/"
+            directory_inputs = f"/mnt/scitas/bastien/SDE_xp/random_corruption/inputs_{noise_levels}/"
+            directory_targets = f"/mnt/scitas/bastien/SDE_xp/random_corruption/targets_{noise_levels}/"
+            os.makedirs(directory_reconstruction, exist_ok=True)
+            os.makedirs(directory_inputs, exist_ok=True)
+            os.makedirs(directory_targets, exist_ok=True)
+            for i in tqdm(range(stop_iteration_at)):
+                try:
+                    corruption = random.choice(corruptions_list)
+                    cfg = self.cfg
+                    with open_dict(cfg):
+                        cfg.trainer.corruption = corruption
+                        cfg.trainer.corruption_severity = corruption_severity
+                        cfg.split = "test"
+                    _ , test_dataset = get_dataset(None, cfg)
+                    test_dataloader = create_dataloader(
+                        test_dataset,
+                        rank=cfg.trainer.rank,
+                        max_workers=cfg.trainer.num_workers,
+                        world_size=cfg.trainer.world_size,
+                        batch_size=batch_size,
+                        shuffle = True,
+                        )
+                    z = np.random.randint(len(test_dataloader))
+                    for k, batch in enumerate(test_dataloader):
+                        if k != z:
+                            continue
+                        inputs, targets = batch
+                        inputs_normalized = inputs/2 +0.5
+                        targets_normalized = targets/2 + 0.5
+                        for n in range(len(inputs_normalized)):
+                            save_image(inputs_normalized[n],directory_inputs+f"input_{i*batch_size+n+add_index_per_gpu}.png")
+                            save_image(targets_normalized[n],directory_targets+f"target_{i*batch_size+n+add_index_per_gpu}.png")
+                        inputs = inputs.cuda(self.cfg.trainer.gpu)
+                        targets = targets.cuda(self.cfg.trainer.gpu)
+                        results = SDEditing(inputs, betas, logvar, model, sample_step, noise_levels, n=1, huggingface = celebahq)
+                        results_normalized = results / 2 + 0.5
+                        for n, image in enumerate(results_normalized):
+                            save_image(image, directory_reconstruction+f"reconstruction_{i*batch_size+n+add_index_per_gpu}.png")
+                except Exception as e:
+                    print(f"Error in step {i}, gpu {self.cfg.trainer.gpu}")
+                    print(e)
+                    continue
+                      
 
     @torch.no_grad()
     def run_metrics(self,number_of_test_per_corruption = 19000,random_corruption = False, batch_size = 20,number_of_sample=1,  number_of_encoding_decoding = 1):
@@ -474,15 +545,15 @@ class DDIB_Trainer(BaseTrainer):
         print("stop_iteration_at", stop_iteration_at)
         add_index_per_gpu = self.cfg.trainer.gpu*stop_iteration_at*batch_size
         print(f"On GPU {self.cfg.trainer.gpu} start index:", add_index_per_gpu)
+        directory_results = f"/mnt/scitas/bastien/ODE_xp/random_corruption/metrics_new/"
+        directory_reconstruction =  f"/mnt/scitas/bastien/ODE_xp/random_corruption/reconstruction_new/"
+        directory_inputs = f"/mnt/scitas/bastien/ODE_xp/random_corruption/inputs_new/"
+        directory_targets = f"/mnt/scitas/bastien/ODE_xp/random_corruption/targets_new/"
+        os.makedirs(directory_reconstruction, exist_ok=True)
+        os.makedirs(directory_inputs, exist_ok=True)
+        os.makedirs(directory_results, exist_ok=True)
+        os.makedirs(directory_targets, exist_ok=True)
         if random_corruption:
-            directory_results = f"/mnt/scitas/bastien/ODE_xp/random_corruption/metrics_new/"
-            directory_reconstruction =  f"/mnt/scitas/bastien/ODE_xp/random_corruption/reconstruction_new/"
-            directory_inputs = f"/mnt/scitas/bastien/ODE_xp/random_corruption/inputs_new/"
-            directory_targets = f"/mnt/scitas/bastien/ODE_xp/random_corruption/targets_new/"
-            os.makedirs(directory_reconstruction, exist_ok=True)
-            os.makedirs(directory_inputs, exist_ok=True)
-            os.makedirs(directory_results, exist_ok=True)
-            os.makedirs(directory_targets, exist_ok=True)
             for i in tqdm(range(stop_iteration_at)):
                 try:
                     corruption = random.choice(corruptions_list)

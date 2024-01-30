@@ -473,8 +473,9 @@ def frost(x, severity=1):
          (0.6, 0.75)][severity - 1]
     idx = np.random.randint(5)
     import os
-    filename = ['ddpm/datasets/frost1.png', 'ddpm/datasets/frost2.png', 'ddpm/datasets/frost3.png', 'ddpm/datasets/frost4.jpg', 
-                    'ddpm/datasets/frost5.jpg', 'ddpm/datasets/frost6.jpg'][idx]
+    filename = ['/home/bastienvandelft/Projects/ddpm/ddpm/datasets/frost1.png', '/home/bastienvandelft/Projects/ddpm/ddpm/datasets/frost2.png', 
+                '/home/bastienvandelft/Projects/ddpm/ddpm/datasets/frost3.png', '/home/bastienvandelft/Projects/ddpm/ddpm/datasets/frost4.jpg', 
+                    '/home/bastienvandelft/Projects/ddpm/ddpm/datasets/frost5.jpg', '/home/bastienvandelft/Projects/ddpm/ddpm/datasets/frost6.jpg'][idx]
     frost = cv2.imread(filename)
     # randomly crop and convert to rgb
     shape = np.array(x).shape

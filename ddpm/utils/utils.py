@@ -15,6 +15,7 @@ import math
 import cv2
 from skimage.metrics import structural_similarity
 
+
 def image_align(deblurred, gt):
   # this function is based on kohler evaluation code
   z = deblurred

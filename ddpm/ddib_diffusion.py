@@ -628,14 +628,16 @@ class GaussianDiffusion:
             # print(f"Model variance 2 {model_variance_2.mean()}")
             # print(f"Model variance t+1 {model_variance_3.mean()}")
         _,model_variance_t,_ = self.q_mean_variance(x, t)
-        alpha_bar_prev = _extract_into_tensor(self.alphas_cumprod_prev, t, x.shape)
-        std = th.sqrt(1 - alpha_bar_prev)
+        # alpha_bar_prev = _extract_into_tensor(self.alphas_cumprod_prev, t, x.shape)
+        # std = th.sqrt(1 - alpha_bar_prev)
+        # model_variance_t = 1 - alpha_bar_prev
+        std = th.sqrt(model_variance_t)
         # print(f"Model variance at {t.item()} {model_variance_t.mean()}")
         # print(f"Full var {model_variance}")
         step_0 = th.tensor([0] * x.shape[0], device=device)
         # smallest_variance = _extract_into_tensor(model_variance, step_0, x.shape)
 
-        _,smallest_variance,_ = self.q_mean_variance(x, step_0)
+        # _,smallest_variance,_ = self.q_mean_variance(x, step_0)
         # smallest_variance = model_variance[1:].min()
         # print(f"Smallest var : {smallest_variance} vs {smallest_variance_2}")
         # elif self.model_var_type in [ModelVarType.LEARNED, ModelVarType.LEARNED_RANGE]:
@@ -644,12 +646,13 @@ class GaussianDiffusion:
         # else: 
         #     raise NotImplementedError
         # print(f" Alpha_{t.item()} : {epsilon * (model_variance_t / smallest_variance).mean()} ")
+        smallest_variance = 1e-5
         gradient_step_scale = []
         noise_step_scale = []
         x_start = x
         intermediate_sample = []
         with th.no_grad():
-            if (t[0] - starting_t) % langevin_step == 0 and std.mean() > 1e-4:
+            if (t[0] - starting_t) % langevin_step == 0 and std.mean() > 1e-2:
                 print(f"Performing {K} langevin updates at step t {t}")
                 for i in range(K):
                     if model_kwargs is None:
@@ -678,7 +681,10 @@ class GaussianDiffusion:
                             model_variance_t = th.clamp(th.exp(model_log_variance), min = smallest_variance)
 
                     # std = th.sqrt(model_variance_t).mean().item()
-                    alpha_i = th.tensor(epsilon).to(device) # (model_variance_t / smallest_variance)
+
+                    alpha_i = (epsilon * model_variance_t).to(device) #
+                    # alpha_i = th.tensor(epsilon).to(device)
+                    # alpha_i = th.tensor(epsilon).to(device)
                         # sigma_i^2 / sigma_end^2 but sigma_end^2 = 1
                     attn_maps = []
 
