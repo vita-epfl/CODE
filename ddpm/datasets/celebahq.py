@@ -35,27 +35,29 @@ class CelebAHQ(VisionDataset):
     base_folder = "CelebAMask-HQ"
 
 
-    def __init__(self, root,
+    def __init__(self, root = "/mnt/scitas/bastien/CelebAMask-HQ/CelebA-HQ-img",
                  split="train",
                  transform=None, target_transform=None,
                  corruption=None,
-                 datapath = "/mnt/scitas/bastien/CelebAMask-HQ/CelebA-HQ-img",
+                #  datapath = "/mnt/scitas/bastien/CelebAMask-HQ/CelebA-HQ-img",
                  corruption_severity=5):
         import pandas
-        super(CelebA, self).__init__(root)
+        super(CelebAHQ, self).__init__(root)
         self.split = split
         self.corruption = corruption
         self.corruption_severity = corruption_severity
         self.transform = transform
         self.target_transform = target_transform
-        self.datapath = datapath
+        self.root = root
+        self.length = len([name for name in os.listdir(self.root) if os.path.isfile(os.path.join(self.root, name))])
+        
 
         
         # mask = (splits[1] == split)
         # self.filename = splits[mask].index.values
 
     def __getitem__(self, index):
-        img_path = f"{self.datapath}/{index}.jpg"
+        img_path = f"{self.root}/{index}.jpg"
         X = PIL.Image.open(img_path)
         X_original = X
         
@@ -124,6 +126,7 @@ class CelebAHQ(VisionDataset):
                 X = PIL.Image.fromarray(snow(X, severity  = self.corruption_severity).astype(np.uint8))
 
 
+
         if self.transform is not None:
             X = self.transform(X)
             X_original = self.transform(X_original)
@@ -131,11 +134,12 @@ class CelebAHQ(VisionDataset):
         if self.target_transform is not None:
             target = self.target_transform(target)
 
-        indexes = torch.ones_like(X_original) * index
+        indexes = torch.ones_like(X_original) * torch.tensor(index)
+        indexes = torch.tensor(index).int()
         return X, X_original, indexes
 
     def __len__(self):
         # TO DO 
         # return len(self.attr)
-        return 30000
+        return self.length
 

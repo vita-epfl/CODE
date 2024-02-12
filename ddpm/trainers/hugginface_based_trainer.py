@@ -21,7 +21,7 @@ from torch import Tensor, nn
 import torch.nn.functional as F
 import torch.optim as optim
 import torch.distributed as dist
-from torch.utils.data import Dataset, DataLoader, DistributedSampler
+from torch.utils.data import Dataset,Subset,  DataLoader, DistributedSampler
 from torch.distributions.categorical import Categorical
 from torch.nn.utils import clip_grad_value_
 from torch.nn.parallel import DistributedDataParallel
@@ -64,6 +64,9 @@ import yaml
 import os
 import numbers
 
+
+from diffusers import UNet2DModel, DDIMScheduler, VQModel, DDIMInverseScheduler
+from diffusers import DDPMPipeline, DDIMPipeline, PNDMPipeline,DiffusionPipeline
 
 from ddpm.datasets.celeba import CelebA 
 from ddpm.ddib_diffusion import GaussianDiffusion, SpacedDiffusion, _extract_into_tensor, space_timesteps, LossType, ModelMeanType, ModelVarType, get_named_beta_schedule
@@ -117,6 +120,7 @@ def create_dataloader(dataset: Dataset,
                         ):
 
     sampler = DistributedSampler(dataset, num_replicas=world_size,shuffle=shuffle,rank=rank)
+
     loader = DataLoader(
         dataset,
         batch_size=batch_size,
@@ -129,7 +133,7 @@ def create_dataloader(dataset: Dataset,
     return loader
 
 
-class DDIB_Trainer(BaseTrainer):
+class Hugginface_Trainer(BaseTrainer):
     def __init__(self, cfg: DictConfig) -> None:
         super().__init__(cfg)
 
@@ -164,51 +168,22 @@ class DDIB_Trainer(BaseTrainer):
         if self.cfg.trainer.gpu is not None:
             torch.cuda.set_device(self.cfg.trainer.gpu)
 
+        self.root = self.cfg.trainer.log_root
         # Get the pipeline, model and its parameters
         self.model_id = self.cfg.trainer.model_id
-        self.ddpm = DDPMPipeline.from_pretrained(self.model_id)  
+        self.ddpm = DDPMPipeline.from_pretrained(self.model_id).to(f"cuda:{self.cfg.trainer.gpu}")
         self.model = self.ddpm.unet
-        self.num_timesteps = int(ddpm.scheduler.betas.shape[0])
+        self.num_timesteps = int(self.ddpm.scheduler.betas.shape[0])
         self.betas = self.ddpm.scheduler.betas
         self.alphas = 1.0 - self.betas
         self.alphas_cumprod = np.cumprod(self.alphas, axis=0)
+        self.dynamic_threshol_ratio = self.cfg.trainer.dynamic_threshol_ratio
+        self.dynamic_threshold_max = self.cfg.trainer.dynamic_threshold_max
 
         self.train_dataset, self.test_dataset = get_dataset(None, self.cfg)
-
-        LOG.info(f"train dataset length {len(self.train_dataset)}")
-        dist.barrier()
-
-        self.train_dataloader = create_dataloader(
-            self.train_dataset,
-            rank=self.cfg.trainer.rank,
-            max_workers=self.cfg.trainer.num_workers,
-            world_size=self.cfg.trainer.world_size,
-            batch_size=self.cfg.trainer.batch_size,
-            )
-        self.datalooper = infiniteloop(self.train_dataloader)
-        self.total_batch = self.cfg.trainer.world_size * self.cfg.trainer.batch_size
-         
-        if self.test_dataset is not None:
-            print("test dataset length",len(self.test_dataset))
-            self.test_dataloader = create_dataloader(
-                    self.test_dataset,
-                    rank=self.cfg.trainer.rank,
-                    max_workers=self.cfg.trainer.num_workers,
-                    world_size=self.cfg.trainer.world_size,
-                    batch_size=self.cfg.trainer.batch_size,
-                )
-            
-        else:
-            self.test_dataloader = self.train_dataloader
-            self.test_dataset = self.train_dataset
-        self.test_datalooper = infiniteloop(self.test_dataloader)
-
-        self.steps_in_one_epoch = len(self.train_dataset) // self.total_batch
-        LOG.info(f"Number of step per epoch: {self.steps_in_one_epoch}")
         
-
-        x_T = torch.randn(self.cfg.trainer.sample_size, self.cfg.trainer.input_channel, self.cfg.trainer.img_size, self.cfg.trainer.img_size)
-        self.x_T = x_T.cuda(self.cfg.trainer.gpu)
+        dist.barrier()
+        LOG.info(f"train dataset length {len(self.train_dataset)}")
 
 
 
@@ -221,7 +196,28 @@ class DDIB_Trainer(BaseTrainer):
         Log inputs/outputs in clearml or wandb or tensorboard
         Log process 
         """
-    def _threshold_sample(sample: torch.FloatTensor, dynamic_thresholding_ratio: float, sample_max_value : float = 5/3) -> torch.FloatTensor:
+    
+
+    def _clip_inputs(self, sample: torch.FloatTensor, t : int, number_of_stds: float = 2.):
+        """
+        Cliping the inputs with an confidence interval given by the diffusion schedule
+        """
+        dtype = sample.dtype
+        batch_size, channels, *remaining_dims = sample.shape
+
+        if dtype not in (torch.float32, torch.float64):
+            sample = sample.float()  # upcast for quantile calculation, and clamp not implemented for cpu half
+        alpha_t = self.alphas_cumprod[t]
+        sqrt_alpha_t = torch.sqrt(alpha_t).item()
+        one_minus_sqrt_alpha_t = torch.sqrt(1-alpha_t).item()
+        confidence_interval = [-sqrt_alpha_t - number_of_stds * one_minus_sqrt_alpha_t,sqrt_alpha_t + number_of_stds * one_minus_sqrt_alpha_t]
+        sample = torch.clamp(sample, confidence_interval[0], confidence_interval[1])
+        sample = sample.to(dtype)
+
+        return sample
+
+
+    def _threshold_sample(self, sample: torch.FloatTensor, dynamic_thresholding_ratio: float, sample_max_value : float = 5/3) -> torch.FloatTensor:
         """
         "Dynamic thresholding: At each sampling step we set s to a certain percentile absolute pixel value in xt0 (the
         prediction of x_0 at timestep t), and if s > 1, then we threshold xt0 to the range [-s, s] and then divide by
@@ -241,7 +237,6 @@ class DDIB_Trainer(BaseTrainer):
         sample = sample.reshape(batch_size, channels * np.prod(remaining_dims))
 
         abs_sample = sample.abs()  # "a certain percentile absolute pixel value"
-
         s = torch.quantile(abs_sample, dynamic_thresholding_ratio, dim=1)
         s = torch.clamp(
             s, min=1, max=sample_max_value
@@ -256,40 +251,46 @@ class DDIB_Trainer(BaseTrainer):
 
 
     @torch.no_grad()
-    def langevin_sampling(inputs, model, t, t_prev, alphas_cumprod,alphas = alphas, steps = 100, epsilon = 1e-5,min_variance = -1, 
-                        device = device, denoising_step = True, clip_prev = False, clip_now = False, dynamic_thresholding = False,  power  = 0.5):
-        timestep = t
-        t = torch.tensor([t] * inputs.shape[0], device=device)  
+    def langevin_sampling(self, inputs, t, t_prev, steps = 100, epsilon = 1e-5,min_variance = -1, 
+                         denoising_step = True, clip_prev = False, clip_now = False, dynamic_thresholding = False,  power  = 0.5):
+
+
+        alphas_cumprod = self.ddpm.scheduler.alphas_cumprod.cpu().numpy()
+        model = self.ddpm.unet
+        index = t
+        t = torch.tensor([t] * inputs.shape[0]).cuda(self.cfg.trainer.gpu)   
         mean_coef_t = torch.sqrt(_extract_into_tensor(alphas_cumprod, t , inputs.shape))
         variance = _extract_into_tensor(1.0 - alphas_cumprod, t , inputs.shape)
-        alphas = alphas.to(device)
         std = torch.sqrt(variance)
         std_epsilon = []
         mean_epsilon = []
         if t_prev is not None:
-            t_prev = torch.tensor([t_prev] * inputs.shape[0], device=device)        
+            t_prev = torch.tensor([t_prev] * inputs.shape[0]).cuda(self.cfg.trainer.gpu)     
             mean_coef_t_prev = torch.sqrt(_extract_into_tensor(alphas_cumprod, t_prev , inputs.shape))
             variance_t_prev = _extract_into_tensor(1.0 - alphas_cumprod, t_prev , inputs.shape)
             std_prev = torch.sqrt(variance_t_prev)
-            noise_estimate_t_prev = model(inputs, t_prev)['sample']
+            if self.cfg.trainer.clip_inputs:
+                inputs = self.clip_inputs(inputs, t = index, number_of_stds = self.cfg.trainer.number_of_stds)
+            noise_estimate_t_prev = self.model(inputs, t_prev)['sample']
             x0_t_1 = (inputs - std_prev * noise_estimate_t_prev)/mean_coef_t_prev
             if dynamic_thresholding:
-                x0_t_1 = _threshold_sample(x0_t_1, self.dynamic_threshol_ratio, self.dynamic_threshold_max)
+                x0_t_1 = self._threshold_sample(x0_t_1, self.dynamic_threshol_ratio, self.dynamic_threshold_max)
             if clip_prev:
                 x0_t_1 = x0_t_1.clamp(-1,1)
             inputs = inputs + x0_t_1 * (mean_coef_t - mean_coef_t_prev)
-        inputs = inputs.to(device)
-        model = model.to(device)
+
         if min_variance > 0:
             alpha_coef =  (variance/min_variance) * epsilon
         else:
             alpha_coef = torch.ones_like(variance) * epsilon
         with torch.no_grad():
             for i in range(steps):
-                noise_estimate = model(inputs, t)['sample']
+                if self.cfg.trainer.clip_inputs:
+                    inputs = self.clip_inputs(inputs, t = index, number_of_stds = self.cfg.trainer.number_of_stds)
+                noise_estimate = self.model(inputs, t)['sample']
                 if dynamic_thresholding:
                     x0_t = (inputs - std * noise_estimate)/mean_coef_t
-                    x0_t = _threshold_sample(x0_t, self.dynamic_threshol_ratio, self.dynamic_threshold_max)
+                    x0_t = self._threshold_sample(x0_t, self.dynamic_threshol_ratio, self.dynamic_threshold_max)
                     noise_estimate = (inputs - mean_coef_t * x0_t) / std
                 elif clip_now:
                     x0_t = (inputs - std * noise_estimate)/mean_coef_t
@@ -298,11 +299,13 @@ class DDIB_Trainer(BaseTrainer):
                 std_epsilon.append(noise_estimate[0].cpu().std().item())
                 mean_epsilon.append(noise_estimate[0].cpu().mean().item())
                 score = - noise_estimate / std
-                noise = torch.randn(inputs.shape).to(device)
+                noise = torch.randn(inputs.shape).cuda(self.cfg.trainer.gpu)
                 if steps > 1:
                     inputs = (inputs + alpha_coef * score) + torch.pow(2*alpha_coef, power) * noise
             if denoising_step:
-                noise_estimate = model(inputs, t)['sample']
+                if self.cfg.trainer.clip_inputs:
+                    inputs = self.clip_inputs(inputs, t = index, number_of_stds = self.cfg.trainer.number_of_stds)
+                noise_estimate = self.model(inputs, t)['sample']
                 score = - noise_estimate / std
                 inputs = (inputs + alpha_coef * score) 
         return inputs, alpha_coef, std_epsilon, mean_epsilon
@@ -311,9 +314,10 @@ class DDIB_Trainer(BaseTrainer):
     @torch.no_grad()
     def ddim_step(self, inputs, t, clip_denoised = False, dynamic_thresholding = True, clip_value = 1, sigma = 0, 
                 forward = True, number_of_sample = 1):
-        alphas_cumprod = self.alphas_cumprod
+        alphas_cumprod = self.alphas_cumprod.cpu().numpy()
         number_of_timesteps = self.ddpm.scheduler.betas.shape[0]
-        model = self.model.cuda(self.cfg.trainer.gpu)
+        # model = self.model.cuda(self.cfg.trainer.gpu)
+        # inputs = inputs.cuda(self.cfg.trainer.gpu)
         if t > 0 and forward:
             t_prev = torch.tensor([t-1] * inputs.shape[0]).cuda(self.cfg.trainer.gpu)
             variance_prev = _extract_into_tensor(1.0 - alphas_cumprod, t_prev , inputs.shape)
@@ -326,12 +330,14 @@ class DDIB_Trainer(BaseTrainer):
         variance = _extract_into_tensor(1.0 - alphas_cumprod, t , inputs.shape)
         mean_coef_t = torch.sqrt(_extract_into_tensor(alphas_cumprod, t , inputs.shape))
         std = torch.sqrt(variance)
-        noise_estimate = model(inputs, t)['sample']
+        if self.cfg.trainer.clip_inputs:
+            inputs = self.clip_inputs(inputs, t = index, number_of_stds = self.cfg.trainer.number_of_stds)
+        noise_estimate = self.model(inputs, t)['sample']
         std_epsilon = noise_estimate[0].cpu().std().item()
         mean_epsilon = noise_estimate[0].cpu().mean().item()
         if dynamic_thresholding:
             x0_t = (inputs - std * noise_estimate)/mean_coef_t
-            x0_t = _threshold_sample(x0_t, self.dynamic_threshol_ratio, self.dynamic_threshold_max)
+            x0_t = self._threshold_sample(x0_t, self.dynamic_threshol_ratio, self.dynamic_threshold_max)
             noise_estimate = (inputs - mean_coef_t * x0_t) / std
             std_epsilon = noise_estimate[0].cpu().std().item()
             mean_epsilon = noise_estimate[0].cpu().mean().item()
@@ -349,216 +355,463 @@ class DDIB_Trainer(BaseTrainer):
         x_prev = torch.sqrt(1-variance_prev) / torch.sqrt(1-variance) * ((inputs - std * noise_estimate)) + torch.sqrt(variance_prev - sigma_t**2)  * noise_estimate + sigma_t * noise
         return x_prev, std_epsilon, mean_epsilon
 
-    def corrupt(number = 9999,corruption = 'spatter', random_sampling = False, random_corruption = False):
+    def corrupt(self, image = None, number = 9999,corruption = 'spatter', random_sampling = False, random_corruption = False):
         corruptions_functions = {"shot_noise" : shot_noise, "gaussian_blur" : gaussian_blur, "spatter" : spatter, "fog":fog, "frost":frost, 
                             "snow":snow, "glass_blur":glass_blur, "elastic_transform":elastic_transform, "contrast":contrast, "brightness":brightness,
                             "gaussian_noise":gaussian_noise, "impulse_noise":impulse_noise, "masking_random_color_random":masking_random_color_random,
-                            "motion_blur":motion_blur,"jpeg_compression":jpeg_compression, "pixelate":pixelate}
+                            "motion_blur":motion_blur, "saturate":motion_blur,'masking_vline_random_color':masking_vline_random_color,"jpeg_compression":jpeg_compression, "pixelate":pixelate,"speckle_noise":motion_blur,}
+        img_list = []
+        original_list = []
         if random_corruption:         
             corruption = random.choice(list(corruptions_functions.keys()))
-        if random_sampling:
-            number = np.random.randint(1,29999)
-            img_path = f"/mnt/scitas/bastien/CelebAMask-HQ/CelebA-HQ-img/{number}.jpg"
-            img_pil = PIL.Image.open(img_path).resize([256,256])
+        if image is None:
+            if random_sampling:
+                number = np.random.randint(1,29999)
+                img_path = f"{self.root}/CelebAMask-HQ/CelebA-HQ-img/{number}.jpg"
+                img_pil = PIL.Image.open(img_path).resize([256,256])
 
+            else:
+                img_path = f"{self.root}/CelebAMask-HQ/CelebA-HQ-img/{number}.jpg"
+                img_pil = PIL.Image.open(img_path).resize([256,256])
+            corrupted_sample = PIL.Image.fromarray(corruptions_functions[corruption](img_pil, severity  = 5).astype(np.uint8))
+            img_tensor = (torch.from_numpy(np.array(corrupted_sample)).permute(2,0,1)/255)*2-1
+            original = (torch.from_numpy(np.array(img_pil)).permute(2,0,1)/255)*2-1
+            img_list.append(img_tensor)
+            original_list.append(original)
         else:
-            img_path = f"/mnt/scitas/bastien/CelebAMask-HQ/CelebA-HQ-img/{number}.jpg"
-            img_pil = PIL.Image.open(img_path).resize([256,256])
-        corrupted_sample = PIL.Image.fromarray(corruptions_functions[corruption](img_pil, severity  = 5).astype(np.uint8))
-        img_tensor = (torch.from_numpy(np.array(corrupted_sample)).permute(2,0,1)/255)*2-1
-        original = (torch.from_numpy(np.array(img_pil)).permute(2,0,1)/255)*2-1
-        
+
+            if len(image.shape)>3:
+                for img in image:
+                    img_pil = (transforms.functional.to_pil_image(img/2+0.5)).resize([256,256])
+                    corrupted_sample = PIL.Image.fromarray(corruptions_functions[corruption](img_pil, severity  = 5).astype(np.uint8)).resize([256,256])
+                    img_tensor = (torch.from_numpy(np.array(corrupted_sample)).permute(2,0,1)/255)*2-1
+                    original = (torch.from_numpy(np.array(img_pil)).permute(2,0,1)/255)*2-1
+                    img_list.append(img_tensor)
+                    original_list.append(original)
+            else:
+                img_pil = (transforms.functional.to_pil_image(image/2+0.5)).resize([256,256])
+                corrupted_sample = PIL.Image.fromarray(corruptions_functions[corruption](img_pil, severity  = 5).astype(np.uint8))
+                img_tensor = (torch.from_numpy(np.array(corrupted_sample)).permute(2,0,1)/255)*2-1
+                original = (torch.from_numpy(np.array(img_pil)).permute(2,0,1)/255)*2-1
+                img_list.append(img_tensor)
+                original_list.append(original)
+
+        img_tensor = torch.stack(img_list)
+        original = torch.stack(original_list)
         return img_tensor, original
 
-def editing_with_ode(latent_codes, model, t_start = 1000, std_div = 0.05, annealing = False, epsilon = 1e-8, steps = 20, power =0.5, 
-                     min_variance = -1. , number_of_sample = 1,normalize=False, alphas_cumprod = alphas_cumprod, 
-                     corrector_step = True,deep_correction = False, comparison = False):
-    list_of_evolution_reverse = []
-    final_samples = []
-    t_valid = list(range(0, min(1000,t_start)))
-    std_recon = 1
-    
-    with torch.no_grad():
-        if normalize:
-            inputs = (latent_codes[np.max(t_valid)] - latent_codes[np.max(t_valid)].mean())/latent_codes[np.max(t_valid)].std()
-            batch_size = inputs.shape[0]
+    def editing_with_ode(self, latent_codes, model, t_start = 1000, std_div = 0.05, annealing = False, epsilon = 1e-8, 
+                        steps = 20, power =0.5, 
+                        min_variance = -1. , number_of_sample = 1,normalize=False,
+                        corrector_step = 1,deep_correction = False, comparison = False):
+        alphas_cumprod = self.ddpm.scheduler.alphas_cumprod
+        list_of_evolution_reverse = []
+        final_samples = []
+        t_valid = list(range(0, min(1000,t_start)))
+        std_recon = 1
+        if t_start > 99 + corrector_step and corrector_step > 1:
+            correction_latents = np.linspace(99, np.max(t_valid), corrector_step).astype(int).tolist()
+            epsilon_correction = np.geomspace(1,1000,1000)[::-1] 
+            epsilon_correction = epsilon_correction / epsilon_correction[np.max(t_valid)]
         else:
-            inputs = latent_codes[np.max(t_valid)]
-            batch_size = inputs.shape[0]
-            inputs = inputs.split(len(inputs)-1, dim=0)
-            inputs = [input.repeat(number_of_sample, 1, 1, 1) for input in inputs]
-            inputs = torch.cat(inputs)
-        edited_to_be_done = True
-        if comparison:
-            run_with_correction = [True,False]
-        else:
-            run_with_correction = [corrector_step]
-        for corrector in run_with_correction:
-            for t in range(1,np.max(t_valid)+1)[::-1]:
-                alpha_std = alphas[t]
-                counter = 0
-                if std_div > 0:
-                    if t>100 and t < t_start-1:
-                        while std_recon < (1-std_div) or std_recon > (1+std_div):
-                            inputs,alpha_coef, list_of_stds, list_of_means = langevin_sampling(inputs, model, t, None, alphas_cumprod, steps = steps, epsilon = epsilon,
-                                                   min_variance = min_variance, clip_prev = False, clip_now = False,dynamic_thresholding=True, device = device, power = power)
+            correction_latents = [np.max(t_valid)]
+
         
-                            std_recon = list_of_stds[-1]
-                            counter += 1
-                            if counter > 100:
-                                epsilon = 2*epsilon
-                            for h in range(len(inputs)):
+        with torch.no_grad():
+            if normalize:
+                inputs = (latent_codes[np.max(t_valid)] - latent_codes[np.max(t_valid)].mean())/latent_codes[np.max(t_valid)].std()
+            else:
+                inputs = latent_codes[np.max(t_valid)]
+            if len(inputs.shape) == 3:
+                inputs = inputs.unsqueeze(0)
+                batch_size = 1
+            elif len(inputs.shape) == 4:
+                batch_size = inputs.shape[0]
+            else:
+                raise NotImplementedError
+            
+            if batch_size > 1 and number_of_sample > 1:
+                inputs = inputs.split(1, dim=0)
+                inputs = [inp.repeat(number_of_sample, 1, 1, 1) for inp in inputs]
+                inputs = torch.cat(inputs)
+                
+            elif number_of_sample > 1:
+                inputs = inputs.repeat(number_of_sample, 1, 1, 1)
+            else:
+                inputs = inputs
+
+            inputs = inputs.cuda(self.cfg.trainer.gpu)
+
+            edited_to_be_done = True
+            if comparison:
+                run_with_correction = [True,False]
+            else:
+                run_with_correction = [corrector_step]
+            for corrector in run_with_correction:
+                for t in range(1,np.max(t_valid)+1)[::-1]:
+                    counter = 0
+                    if std_div > 0:
+                        if t>100 and t < t_start-1:
+                            while std_recon < (1-std_div) or std_recon > (1+std_div):
+                                inputs,alpha_coef, list_of_stds, list_of_means = self.langevin_sampling(inputs, t, None, steps = steps, epsilon = epsilon,
+                                                    min_variance = min_variance, clip_prev = False, clip_now = False,dynamic_thresholding=True, power = power)
+            
+                                std_recon = list_of_stds[-1]
+                                counter += 1
+                                if counter > 100:
+                                    epsilon = 2*epsilon
+                                for h in range(len(inputs)):
+                                    list_of_evolution_reverse.append(inputs[h].cpu())
+                            epsilon *= 1
+                            
+                    elif t == np.max(t_valid) and edited_to_be_done:
+                        before = inputs.cpu()
+                        if annealing>=1:
+                            for j in range(int(annealing)):
+                                step_per_epsilon = steps // len(range(int(annealing)))
+                                inputs,alpha_coef, list_of_stds, list_of_means = self.langevin_sampling(inputs, t, None, steps = step_per_epsilon, epsilon = epsilon,
+                                                    min_variance = min_variance, clip_prev = False, clip_now = False,dynamic_thresholding=True,power = power)
+                                epsilon  = epsilon / 2
+   
+                        else:
+                            inputs,alpha_coef, list_of_stds, list_of_means = self.langevin_sampling(inputs, t, None, steps = steps, epsilon = epsilon,
+                                    min_variance = min_variance, clip_prev = False, clip_now = False,dynamic_thresholding=True, power = power)  
+                        std_recon = list_of_stds[-1]
+                        for h in range(len(inputs)):
                                 list_of_evolution_reverse.append(inputs[h].cpu())
-                        epsilon *= 1
-                        
-                elif t == t_start-1 and edited_to_be_done:
-                    before = inputs.cpu()
-                    if annealing>=1:
-                        for j in range(int(annealing)):
-                            step_per_epsilon = steps // len(range(int(annealing)))
-                            inputs,alpha_coef, list_of_stds, list_of_means = langevin_sampling(inputs, model, t, None, alphas_cumprod, steps = step_per_epsilon, epsilon = epsilon,
-                                                   min_variance = min_variance, clip_prev = False, clip_now = False,dynamic_thresholding=True, device = device, power = power)
-                            epsilon  = epsilon / 2
-                            plt.figure(figsize=[10,10])
-                            plt.imshow(make_grid(torch.cat([before.squeeze(), inputs.squeeze().cpu()])).permute(1,2,0)/2+0.5)
-                            plt.show()
-                    else:
-                        inputs,alpha_coef, list_of_stds, list_of_means = langevin_sampling(inputs, model, t, None, alphas_cumprod, steps = steps, epsilon = epsilon,
-                                min_variance = min_variance, clip_prev = False, clip_now = False,dynamic_thresholding=True, device = device, power = power)  
-                    std_recon = list_of_stds[-1]
-                    for h in range(len(inputs)):
-                            list_of_evolution_reverse.append(inputs[h].cpu())
-                    edited_latents = inputs
-                    edited_to_be_done = False
-                elif t == t_start-1:
-                    inputs = edited_latents
-                if corrector:
-                    if deep_correction:
-                        if t < 80 and t % 19 == 0:           
-                            inputs,alpha_coef, list_of_stds, list_of_means = langevin_sampling(inputs, model, t, t, alphas_cumprod, 
-                                                                                steps = 100, epsilon = 5e-4,
-                                                                                min_variance = min_variance, clip_prev = False,
-                                                                                clip_now = False,dynamic_thresholding=True, device = device, 
-                                                                                power = power)
-    
-                            std_recon = list_of_stds[-1]
-                    else:
-                            inputs,alpha_coef, list_of_stds, list_of_means = langevin_sampling(inputs, model, t, t, alphas_cumprod, 
-                                                                                steps = 1, epsilon = 1e-7,
-                                                                                min_variance = min_variance, clip_prev = False,
-                                                                                clip_now = False,dynamic_thresholding=True, device = device, 
-                                                                                power = power)
-    
-                            std_recon = list_of_stds[-1]
-                inputs, std_epsilon, mean_epsilon = ddim_step(inputs, model, t, alphas_cumprod, sigma = 0.,
-                                                          clip_denoised=True,dynamic_thresholding=True, 
-                                                          device = device, forward=True, number_of_sample = number_of_sample)               
-                std_recon = std_epsilon
-                for h in range(len(inputs)):
-                    list_of_evolution_reverse.append(inputs[h].cpu())
-            for sample in list_of_evolution_reverse[-batch_size*number_of_sample:]:
-                final_samples.append(sample)
+                        edited_latents = inputs
+                        edited_to_be_done = False
+                    elif t == np.max(t_valid):
+                        inputs = edited_latents
+                    elif t in correction_latents:
+                        before = inputs.cpu()
+                        epsilon = epsilon_correction[t]
+                        if annealing>=1:
+                            for j in range(int(annealing)):
+                                step_per_epsilon = steps // len(range(int(annealing)))
+                                inputs,alpha_coef, list_of_stds, list_of_means = self.langevin_sampling(inputs, t, None, steps = step_per_epsilon, epsilon = epsilon,
+                                                    min_variance = min_variance, clip_prev = False, clip_now = False,dynamic_thresholding=True,power = power)
+                                epsilon  = epsilon / 2
+   
+                        else:
+                            inputs,alpha_coef, list_of_stds, list_of_means = self.langevin_sampling(inputs, t, None, steps = steps, epsilon = epsilon,
+                                    min_variance = min_variance, clip_prev = False, clip_now = False,dynamic_thresholding=True, power = power)  
+                        std_recon = list_of_stds[-1]
+                        for h in range(len(inputs)):
+                                list_of_evolution_reverse.append(inputs[h].cpu())
+                    if corrector:
+                        if deep_correction:
+                            if t < 80 and t % 19 == 0:           
+                                inputs,alpha_coef, list_of_stds, list_of_means = self.langevin_sampling(inputs, t, None, 
+                                                                                    steps = 100, epsilon = 5e-4,
+                                                                                    min_variance = min_variance, clip_prev = False,
+                                                                                    clip_now = False,dynamic_thresholding=True, 
+                                                                                    power = power)
         
-        for h in range(len(inputs)):
-            list_of_evolution_reverse.append(inputs[h].cpu())
-    return list_of_evolution_reverse, final_samples
+                                std_recon = list_of_stds[-1]
+                        else:
+                                inputs,alpha_coef, list_of_stds, list_of_means = self.langevin_sampling(inputs, t, None, 
+                                                                                    steps = 1, epsilon = 1e-7,
+                                                                                    min_variance = min_variance, clip_prev = False,
+                                                                                    clip_now = False,dynamic_thresholding=True,
+                                                                                    power = power)
+        
+                                std_recon = list_of_stds[-1]
+                    inputs, std_epsilon, mean_epsilon = self.ddim_step(inputs, t, sigma = 0.,
+                                                            clip_denoised=True,dynamic_thresholding=True,  forward=True, number_of_sample = number_of_sample)               
+                    std_recon = std_epsilon
+                    for h in range(len(inputs)):
+                        list_of_evolution_reverse.append(inputs[h].cpu())
+                for sample in list_of_evolution_reverse[-batch_size*number_of_sample:]:
+                    final_samples.append(sample)
+                    
+            for h in range(len(inputs)):
+                list_of_evolution_reverse.append(inputs[h].cpu())
+        return list_of_evolution_reverse, final_samples
 
 
     @torch.no_grad()
-    def encode_inputs(self, inputs) 
+    def encode_inputs(self, inputs): 
         latent_codes = []
+        list_std_encoding = []
+        list_mean_encoding = []
         with torch.no_grad():
             latent_codes.append(inputs)
             for t in range(0,self.ddpm.scheduler.betas.shape[0]-1):
-                inputs, std_eps, mean_eps = self.ddim_step(inputs, self.ddpm.unet, t, self.alphas_cumprod, sigma = 0.,
-                                            clip_denoised=True,dynamic_thresholding = True, forward=False)
-                latent_codes.append(inputs)
+                inputs, std_eps, mean_eps = self.ddim_step(inputs, t,  sigma = 0.,clip_denoised=True,dynamic_thresholding = True, forward=False)
+                latent_codes.append(inputs.cpu())
                 list_std_encoding.append(std_eps)
                 list_mean_encoding.append(mean_eps)
         return latent_codes, list_mean_encoding, list_std_encoding
 
+
     @torch.no_grad()
-    def old_encoding_input(self, inputs):
-        self.ema_model.eval()
-        while len(inputs.shape)<4:
-            inputs = inputs.unsqueeze(0)
-        reversing_inputs = inputs.cuda(self.cfg.trainer.gpu)
-        reverse_encoding = self.ode_diffusion.ddim_reverse_sample_loop_progressive(self.ema_model,reversing_inputs,
-                                                                                    clip_denoised=True, eta=0.)
-        ddpm_of_reencoded_tensor = []
-        with torch.no_grad():
-            for dic in tqdm(reverse_encoding):
-                ddpm_of_reencoded_tensor.append(dic['sample'].cpu())
+    def batch_for_single_image_experiments(self, input_image = None, number = 1):
+            corruptions_list = ["motion_blur", "frost", "speckle_noise", "impulse_noise", "shot_noise", "jpeg_compression",
+                                "pixelate", "brightness", "fog", "saturate", "gaussian_noise", 'elastic_transform',
+                                'snow', 'masking_vline_random_color', 'spatter', 'glass_blur', 'gaussian_blur', 'contrast']
+
+            # directory_clean_original = "/mnt/scitas/bastien/ODEDIT/original"
+            # directory_corrupted = "/mnt/scitas/bastien/ODEDIT/corrupted"
+            # directory_reconstruction_sde = "/mnt/scitas/bastien/ODEDIT/sde"
+            # directory_reconstruction_ode = "/mnt/scitas/bastien/ODEDIT/ode"
+            # directory_latent = "/mnt/scitas/bastien/ODEDIT/latent"
+
+            # os.makedirs(directory_clean_original, exist_ok=True)
+            # os.makedirs(directory_corrupted, exist_ok=True)
+            # os.makedirs(directory_reconstruction_sde, exist_ok=True)
+            # os.makedirs(directory_reconstruction_ode, exist_ok=True)
+
+            img_list = []
+            original_list = []
+
+            for corruption in corruptions_list:
+                img_tensor, original = self.corrupt(image=input_image, number = number, corruption=corruption)
+                img_list.append(img_tensor.squeeze())
+                original_list.append(original.squeeze())
+
+            img_tensor_batch = torch.stack(img_list)
+            original_batch = torch.stack(original_list)
+
+            # The rest of your code to log or save the results goes here...
+            # For example, you can use img_tensor_batch and original_batch as needed.
+
+            return img_tensor_batch, original_batch
         
-        seed = ddpm_of_reencoded_tensor[-1].cuda(self.cfg.trainer.gpu)
-        return seed
-    
-    # store reconstruction par ode/sde/original/corrupted,latent/noise/img_number/samples
+    # stor    @torch.no_grad()
+    def run_qualitative_experiments(self,number_of_image = 1, corruptions = 'all', sde_range = [99,1000,100], 
+                            ode_range = [99, 1000, 100], number_of_sample = 3, celebaHQ = True):
+        # number_of_image = self.cfg.trainer.number_of_image or number_of_image
+        ode_range = self.cfg.trainer.ode_range or ode_range
+        number_of_sample = self.cfg.trainer.number_of_sample or number_of_sample
+        if celebaHQ:
+            all_numbers = range(len(self.train_dataset))
+            images_numbers = np.random.choice(all_numbers, number_of_image)
+
+        sde_model, sde_betas, sde_num_timesteps, sde_logvar = load_model(device=f"cuda:{self.cfg.trainer.gpu}")
+        self.subset_dataset = Subset(self.train_dataset, list(images_numbers))
+        LOG.info(f"SubDataset length {len(self.subset_dataset)} ")
+
+        directory_clean_original = f"{self.root}/ODEDIT/qualitative/original"
+        directory_corrupted = f"{self.root}/ODEDIT/qualitative/corrupted"
+        directory_reconstruction_sde =  f"{self.root}/ODEDIT/qualitative/sde"
+        directory_reconstruction_ode =  f"{self.root}/ODEDIT/qualitative/ode"
+        directory_latent = f"{self.root}/ODEDIT/qualitative/latent"
+        os.makedirs(directory_clean_original, exist_ok=True)
+        os.makedirs(directory_corrupted, exist_ok=True)
+        os.makedirs(directory_reconstruction_sde, exist_ok=True)
+        os.makedirs(directory_reconstruction_ode, exist_ok=True)
+        os.makedirs(directory_latent, exist_ok=True)
+
+        self.dataloader = create_dataloader(self.subset_dataset,
+                                        rank=self.cfg.trainer.rank,
+                                        max_workers=self.cfg.trainer.num_workers,
+                                        world_size=self.cfg.trainer.world_size,
+                                        batch_size=self.cfg.trainer.batch_size,
+                                        shuffle=False
+                                        )
+        LOG.info(f"Dataloader length {len(self.dataloader)} on GPU: {self.cfg.trainer.gpu}")
+        LOG.info(f"Dataloader length {len(self.dataloader)} on GPU: {self.cfg.trainer.gpu}")
+
+
+        epsilons = np.geomspace(self.cfg.trainer.min_epsilon,self.cfg.trainer.max_epsilon, self.cfg.trainer.number_of_epsilons)
+        list_steps = [self.cfg.trainer.number_of_steps]
+        LOG.info(f"Starting Dataloader loop.")
+        for k, (_, img_batch, indexes) in enumerate(self.dataloader):
+            index_list = indexes.tolist()
+            img_tensor, original = self.batch_for_single_image_experiments(img_batch, number = k)
+            img_tensor = img_tensor.cuda(self.cfg.trainer.gpu)
+            original = original.cuda(self.cfg.trainer.gpu)
+            # print('shape',img_tensor.shape)
+            for i,image in enumerate(img_tensor):
+                save_image(img_tensor[i].cpu()/2+0.5,directory_corrupted+f"/{i}_{self.cfg.trainer.gpu}.png")
+                save_image(original[i].cpu()/2+0.5,directory_clean_original+f"/{i}_{self.cfg.trainer.gpu}.png")
+            if self.cfg.trainer.gpu == 0:
+                grid_corrupted = make_grid(img_tensor.cpu().detach())
+                grid_original = make_grid(original.cpu().detach())
+                img_grid_corrupted = wandb.Image(grid_corrupted.permute(1,2,0).numpy())
+                img_grid_original= wandb.Image(grid_original.permute(1,2,0).numpy())
+                wandb.log({f"Corruption": img_grid_corrupted},commit=True)
+                wandb.log({f"Original": img_grid_original},commit=True)
+
+            # for latent in range(sde_range[0],sde_range[1], sde_range[2]):
+            #     sample_step = 1
+            #     directory_reconstruction_sde_latent_corruption = f"{directory_reconstruction_sde}/latent_{latent}"
+            #     os.makedirs(directory_reconstruction_sde_latent_corruption, exist_ok=True)
+            #     results = SDEditing(img_tensor, sde_betas, sde_logvar, sde_model, sample_step, latent, n=number_of_sample, huggingface = True)
+            #     results_normalized = results / 2 + 0.5
+            #     for n, image in enumerate(results_normalized):
+            #         save_image(image.cpu(), directory_reconstruction_sde_latent_corruption+f"{n}_{self.cfg.trainer.gpu}.png")
+            #     if self.cfg.trainer.gpu == 0:
+            #         grid_reco_sde = make_grid(results_normalized.cpu().detach())
+            #         img_grid_reco_sde = wandb.Image(grid_reco_sde.permute(1,2,0).numpy())
+            #         wandb.log({f"SDE_Reconstruction_{latent}_{n}": img_grid_reco_sde},commit=True)
+                
+
+            #run ode
+            latent_codes, _, _ = self.encode_inputs(img_tensor)
+            for latent in range(ode_range[0], ode_range[1], ode_range[2]):
+                directory_reconstruction_ode_latent_corruption = f"{directory_reconstruction_ode}/latent_{latent}"
+                os.makedirs(directory_reconstruction_ode_latent_corruption, exist_ok=True)
+
+                for i,image_index in enumerate(index_list):
+                    save_image(latent_codes[latent][i].cpu()/2+0.5, f"{directory_reconstruction_ode_latent_corruption}/{image_index}.png")
+                if self.cfg.trainer.gpu == 0:
+                    grid_latent = make_grid(torch.clamp(latent_codes[latent].cpu().detach(),-1,1))
+                    img_grid_latent = wandb.Image(grid_latent.permute(1,2,0).numpy())
+                    wandb.log({f"Latent_{latent}": img_grid_latent},commit=True)
+
+                ## To define --> Probably fix steps with different epsilon
+                for number_of_steps in list_steps:
+                    for epsilon in epsilons:
+                        for _, image_index in enumerate(index_list):
+                            os.makedirs(f"{directory_reconstruction_ode_latent_corruption}/{image_index}/{number_of_steps}_{round(epsilon,6)}", exist_ok = True)
+                        list_of_evolution_reverse, samples = self.editing_with_ode(latent_codes, self.ddpm.unet, t_start = latent, 
+                                    std_div = -1, epsilon = epsilon, steps = number_of_steps, power =0.5, 
+                                    number_of_sample = number_of_sample,
+                                    corrector_step = self.cfg.trainer.number_of_latents_corrected,
+                                    deep_correction=False, comparison = False)
+                        samples_stacked = torch.stack(samples)
+                        if self.cfg.trainer.batch_size > 1:
+                            samples = torch.stack(samples_stacked.split(number_of_sample, dim=0)) 
+                            for sample_index, image_index in enumerate(index_list):
+                                for m in range(number_of_sample):
+                                    save_image(samples[sample_index][m].cpu()/2+0.5, 
+                                        f"{directory_reconstruction_ode_latent_corruption}/{image_index}/{number_of_steps}_{round(epsilon,6)}/{m}_{self.cfg.trainer.gpu}.png")
+                            if self.cfg.trainer.gpu == 0:
+                                grid_reco = make_grid(samples_stacked.cpu().detach())
+                                img_grid_reco= wandb.Image(grid_reco.permute(1,2,0).numpy())
+                                wandb.log({f"Reconstruction_l{latent}_e{round(epsilon,6)}_{image_index}": img_grid_reco},commit=True)
+                        else:
+                            for sample_index, image_index in enumerate(index_list):
+                                for m in range(number_of_sample):
+                                    save_image(samples_stacked[m].cpu()/2+0.5, 
+                                        f"{directory_reconstruction_ode_latent_corruption}/{image_index}/{number_of_steps}_{round(epsilon,6)}/{m}_{self.cfg.trainer.gpu}.png")
+                            if self.cfg.trainer.gpu == 0:
+                                grid_reco = make_grid(samples_stacked.cpu().detach())
+                                img_grid_reco= wandb.Image(grid_reco.permute(1,2,0).numpy())
+                                wandb.log({f"Reconstruction_l{latent}_e{round(epsilon,6)}_{image_index}": img_grid_reco},commit=True)
+                            
+        return
+
+
     @torch.no_grad()
-    def run_experiments(self,number_of_image = 1000, corruptions = 'all', sde_range = [100,1001,100], 
-                            ode_range = [100, 1001, 100], number_of_sample = 4, celebaHQ = True)
+    def run_experiments(self,number_of_image = 4, corruptions = 'all', sde_range = [99,1000,100], 
+                            ode_range = [99, 1000, 100], number_of_sample = 4, celebaHQ = True):
+        number_of_image = self.cfg.trainer.number_of_image or number_of_image
         if corruptions == 'all':
-            corruptions_list = ['spatter', "motion_blur", "frost","speckle_noise","impulse_noise","shot_noise","jpeg_compression","pixelate","brightness",
-                            "fog","saturate","gaussian_noise",'elastic_transform','snow','masking_vline_random_color','masking_gaussian','glass_blur','gaussian_blur','contrast']
+            corruptions_list = ["motion_blur", "frost","speckle_noise","impulse_noise","shot_noise","jpeg_compression","pixelate","brightness",
+                            "fog","saturate","gaussian_noise",'elastic_transform','snow','masking_vline_random_color','spatter', 'glass_blur','gaussian_blur','contrast']
         else:
             corruptions_list = [corruptions]
         if celebaHQ:
             all_numbers = range(len(self.train_dataset))
             images_numbers = np.random.choice(all_numbers, number_of_image)
+
         ### get subset of dataset based on the indices
 
-        subset_dataset = Subset(self.train_dataset, list(images_numbers))
-        original_indices = list(range(len(subset_dataset)))
-        remaining_indices = original_indices
-        directory_clean_original = f"/mnt/scitas/bastien/ODEDIT/original"
-        directory_corrupted = f"/mnt/scitas/bastien/ODEDIT/corrupted"
-        directory_reconstruction_sde =  f"/mnt/scitas/bastien/ODEDIT/sde"
-        directory_reconstruction_ode =  f"/mnt/scitas/bastien/ODEDIT/ode"
-        directory_latent = f"/mnt/scitas/bastien/ODEDIT/latent"
+        self.subset_dataset = Subset(self.train_dataset, list(images_numbers))
+        LOG.info(f"SubDataset length {len(self.subset_dataset)} ")
+
+        directory_clean_original = f"{self.root}/ODEDIT/original"
+        directory_corrupted = f"{self.root}/ODEDIT/corrupted"
+        directory_reconstruction_sde =  f"{self.root}/ODEDIT/sde"
+        directory_reconstruction_ode =  f"{self.root}/ODEDIT/ode"
+        directory_latent = f"{self.root}/ODEDIT/latent"
         os.makedirs(directory_clean_original, exist_ok=True)
         os.makedirs(directory_corrupted, exist_ok=True)
         os.makedirs(directory_reconstruction_sde, exist_ok=True)
         os.makedirs(directory_reconstruction_ode, exist_ok=True)
-        
-        dataloader = DataLoader(subset_dataset, batch_size=self.cfg.trainer.batch_size, sampler = SequentialSampler()
-        epsilons = np.np.geomspace(1e-6,1e-2, 10)
-        list_steps = [1000]
-        ### IF different per latent
-        dictionnary_epsilon = {100:[1e-5, 1e-6], 200:[1e-5, 1e-6], 300:[1e-5, 1e-6],400:[1e-5, 1e-6],500:[1e-5, 1e-6],
-                                600:[1e-5, 1e-6],700:[1e-5, 1e-6], 800:[1e-5, 1e-6], 900:[1e-5, 1e-6], 1000:[1e-5, 1e-6]}
-        dictionnary_steps = {100:[100,200], 200:[100,200], 300:[100,200],400:[100,200],500:[100,200],
-                                600:[100,200],700:[100,200], 800:[100,200], 900:[100,200], 1000:[100,200]}
-        for k in list(images_numbers):
-            #run sde
-            for latent in range(sde_range[0],sde_range[1], sde_range[2]):
-                for corruption in corruptions_list:
-                    directory_reconstruction_sde_latent_corruption = f"{directory_reconstruction_sde}/latent_{latent}/{corruption}/{k}"
-                    img_tensor, original = corrupt(number = k, corruption = corruption, random_sampling=False, random_corruption=False)
-                    directory_corrupted_latent = f"/mnt/scitas/bastien/ODEDIT/corrupted/{corruption}"
-                    os.makedirs(directory_corrupted_latent, exist_ok=True)
-                    save_image(img_tensor.cpu()/2+0.5,directory_corrupted_latent+f"/{k}.png")
-                    save_image(original.cpu()/2+0.5,directory_clean_original+f"/{k}.png")
+        self.dataloader = create_dataloader(self.subset_dataset,
+                                        rank=self.cfg.trainer.rank,
+                                        max_workers=self.cfg.trainer.num_workers,
+                                        world_size=self.cfg.trainer.world_size,
+                                        batch_size=self.cfg.trainer.batch_size,
+                                        shuffle=False
+                                        )
+        LOG.info(f"Dataloader length {len(self.dataloader)} on GPU: {self.cfg.trainer.gpu}")
 
-            #run ode
-            for corruption in corruptions_list:
-                img_tensor, original = corrupt(number = k, corruption = corruption, random_sampling=False, random_corruption=False)
-                # TO DO encode 
-                latent_codes = self.encode_inputs(img_tensor)
+
+        epsilons = np.geomspace(self.cfg.trainer.min_epsilon,self.cfg.trainer.max_epsilon, self.cfg.trainer.number_of_epsilons)
+
+        list_steps = [self.cfg.trainer.number_of_steps]
+        ### IF different per latent
+        # dictionnary_epsilon = {100:[1e-5, 1e-6], 200:[1e-5, 1e-6], 300:[1e-5, 1e-6],400:[1e-5, 1e-6],500:[1e-5, 1e-6],
+        #                         600:[1e-5, 1e-6],700:[1e-5, 1e-6], 800:[1e-5, 1e-6], 900:[1e-5, 1e-6], 1000:[1e-5, 1e-6]}
+        # dictionnary_steps = {100:[100,200], 200:[100,200], 300:[100,200],400:[100,200],500:[100,200],
+        #                         600:[100,200],700:[100,200], 800:[100,200], 900:[100,200], 1000:[100,200]}
+        LOG.info(f"Starting Dataloader loop.")
+        for k, (_, img_batch, indexes) in enumerate(self.dataloader):
+            #run sde
+
+            index_list = indexes.tolist()
+            for l, corruption in enumerate(corruptions_list):
+                
+                img_tensor, original = self.corrupt(image = img_batch, number = k, corruption = corruption, random_sampling=False, random_corruption=False)
+                img_tensor = img_tensor.cuda(self.cfg.trainer.gpu)
+                original = original.cuda(self.cfg.trainer.gpu)
+                directory_corrupted_per_corruption = f"{self.root}/ODEDIT/corrupted/{corruption}"
+                os.makedirs(directory_corrupted_per_corruption, exist_ok=True)
+                for i,image_index in enumerate(index_list):
+                    save_image(img_tensor[i].cpu()/2+0.5,directory_corrupted_per_corruption+f"/{image_index}_{self.cfg.trainer.gpu}.png")
+                    save_image(original[i].cpu()/2+0.5,directory_clean_original+f"/{image_index}_{self.cfg.trainer.gpu}.png")
+                if self.cfg.trainer.gpu == 0:
+                    grid_corrupted = make_grid(img_tensor.cpu().detach())
+                    grid_original = make_grid(original.cpu().detach())
+                    img_grid_corrupted = wandb.Image(grid_corrupted.permute(1,2,0).numpy())
+                    img_grid_original= wandb.Image(grid_original.permute(1,2,0).numpy())
+                    wandb.log({f"Corruption_{corruption}": img_grid_corrupted},commit=True)
+                    if l == 0:
+                        wandb.log({f"Original": img_grid_original},commit=True)
+                for latent in range(sde_range[0],sde_range[1], sde_range[2]):
+                    directory_reconstruction_sde_latent_corruption = f"{directory_reconstruction_sde}/latent_{latent}/{corruption}/{k}"
+                    pass
+
+                #run ode
+                latent_codes, _, _ = self.encode_inputs(img_tensor)
                 for latent in range(ode_range[0], ode_range[1], ode_range[2]):
-                    directory_reconstruction_ode_latent_corruption = f"{directory_reconstruction_ode}/latent_{latent}/{corruption}/{k}"
-                    save_image(latent_codes[latent].cpu()/2+0.5, f"{directory_latent}/{latent}/{corruption}/{k}.png")
-                    image_encoded = latent_codes[latent]
+                    directory_reconstruction_ode_latent_corruption = f"{directory_reconstruction_ode}/latent_{latent}/{corruption}"
+                    os.makedirs(directory_reconstruction_ode_latent_corruption, exist_ok=True)
+
+                    for i,image_index in enumerate(index_list):
+                        # os.makedirs(f"{directory_reconstruction_ode_latent_corruption}/{image_index}", exist_ok=True)
+                        save_image(latent_codes[latent][i].cpu()/2+0.5, f"{directory_reconstruction_ode_latent_corruption}/{image_index}.png")
+                    if self.cfg.trainer.gpu == 0:
+                        grid_latent = make_grid(torch.clamp(latent_codes[latent].cpu().detach(),-1,1))
+                        img_grid_latent = wandb.Image(grid_latent.permute(1,2,0).numpy())
+                        wandb.log({f"Latent_{latent}": img_grid_latent},commit=True)
+
                     ## To define --> Probably fix steps with different epsilon
                     for number_of_steps in list_steps:
                         for epsilon in epsilons:
+                            for _, image_index in enumerate(index_list):
+                                os.makedirs(f"{directory_reconstruction_ode_latent_corruption}/{image_index}/{number_of_steps}_{round(epsilon,6)}", exist_ok = True)
                             list_of_evolution_reverse, samples = self.editing_with_ode(latent_codes, self.ddpm.unet, t_start = latent, 
                                         std_div = -1, epsilon = epsilon, steps = number_of_steps, power =0.5, 
-                     number_of_sample = number_of_sample, alphas_cumprod = self.alphas_cumprod, corrector_step = True,
-                                        deep_correction=True, comparison = False)
-                    for index, sample in enumerate(samples):
-                        save_image(latent_codes[latent].cpu()/2+0.5, 
-                                    f"{directory_reconstruction_ode_latent_corruption}/{k}/{number_of_steps}_{epsilon}/{index}.png")
-        
+                                        number_of_sample = number_of_sample,
+                                        corrector_step = False,
+                                        deep_correction=False, comparison = False)
+                            samples_stacked = torch.stack(samples)
+                            if self.cfg.trainer.batch_size > 1:
+                                samples = torch.stack(samples_stacked.split(number_of_sample, dim=0)) 
+                                for sample_index, image_index in enumerate(index_list):
+                                    for m in range(number_of_sample):
+                                        save_image(samples[sample_index][m].cpu()/2+0.5, 
+                                            f"{directory_reconstruction_ode_latent_corruption}/{image_index}/{number_of_steps}_{round(epsilon,6)}/{m}_{self.cfg.trainer.gpu}.png")
+                                if self.cfg.trainer.gpu == 0:
+                                    grid_reco = make_grid(samples_stacked.cpu().detach())
+                                    img_grid_reco= wandb.Image(grid_reco.permute(1,2,0).numpy())
+                                    wandb.log({f"Reconstruction_l{latent}_{corruption}_e{round(epsilon,6)}_{image_index}": img_grid_reco},commit=True)
+                            else:
+                                for sample_index, image_index in enumerate(index_list):
+                                    for m in range(number_of_sample):
+                                        save_image(samples_stacked[m].cpu()/2+0.5, 
+                                            f"{directory_reconstruction_ode_latent_corruption}/{image_index}/{number_of_steps}_{round(epsilon,6)}/{m}_{self.cfg.trainer.gpu}.png")
+                                if self.cfg.trainer.gpu == 0:
+                                    grid_reco = make_grid(samples_stacked.cpu().detach())
+                                    img_grid_reco= wandb.Image(grid_reco.permute(1,2,0).numpy())
+                                    wandb.log({f"Reconstruction_l{latent}_{corruption}_e{round(epsilon,6)}_{image_index}": img_grid_reco},commit=True)
+                             
         return
 
 
@@ -588,9 +841,9 @@ def editing_with_ode(latent_codes, model, t_start = 1000, std_div = 0.05, anneal
             num_timesteps = int(betas.shape[0])
 
         for noise_levels in range(200,800,100):
-            directory_reconstruction =  f"/mnt/scitas/bastien/SDE_xp/random_corruption/reconstruction_{noise_levels}/"
-            directory_inputs = f"/mnt/scitas/bastien/SDE_xp/random_corruption/inputs_{noise_levels}/"
-            directory_targets = f"/mnt/scitas/bastien/SDE_xp/random_corruption/targets_{noise_levels}/"
+            directory_reconstruction =  f"{self.root}/SDE_xp/random_corruption/reconstruction_{noise_levels}/"
+            directory_inputs = f"{self.root}/SDE_xp/random_corruption/inputs_{noise_levels}/"
+            directory_targets = f"{self.root}/SDE_xp/random_corruption/targets_{noise_levels}/"
             os.makedirs(directory_reconstruction, exist_ok=True)
             os.makedirs(directory_inputs, exist_ok=True)
             os.makedirs(directory_targets, exist_ok=True)

@@ -44,9 +44,14 @@ def get_dataset(args, cfg):
     corruption = args.corruption
     split = args.split
     random_flip = args.random_flip
-    lower_image_size = args.lower_image_size
+    try:
+        lower_image_size = args.lower_image_size
+        original_img_size = OmegaConf.to_object(args.original_img_size)
+    except:
+        lower_image_size = None
+        original_img_size = None
     image_size = args.img_size
-    original_img_size = OmegaConf.to_object(args.original_img_size)
+    
     if random_flip is False:
         train_transform = test_transform = transforms.Compose(
             [transforms.Resize(image_size), transforms.ToTensor()]
@@ -81,11 +86,17 @@ def get_dataset(args, cfg):
         )
     elif dataset_name == "CELEBAHQ":
         dataset = CelebAHQ(
+                root=datapath,
                 split="train",
                 corruption=corruption,
                 corruption_severity=corruption_severity,
-            )
-        test_dataset = dataset
+                transform=transforms.Compose(
+                        [transforms.Resize(image_size), 
+                        transforms.ToTensor(),
+                        transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]
+                            )
+                )
+        test_dataset = None
     elif dataset_name == "CELEBA":
         cx = 89
         cy = 121
