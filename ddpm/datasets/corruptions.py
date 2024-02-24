@@ -372,7 +372,7 @@ def masking_simple(x, severity=1):
 
 def masking_random_color(x, severity = 1):
     shape = np.array(x).shape # heigth, width, channels
-    percentage_masking = severity * 0.14
+    percentage_masking = severity * 0.1
     mask = (np.random.rand(shape[0],shape[1],1)>percentage_masking).repeat(shape[2], axis=2).astype(float)
     color = np.random.randint(low = 0, high =255,size=(1,1,shape[2]), dtype = int)
     color = color.repeat(shape[0], axis = 0).repeat(shape[1],axis=1)
@@ -380,7 +380,7 @@ def masking_random_color(x, severity = 1):
 
 def masking_random_color_random(x, severity = 1):
     shape = np.array(x).shape # heigth, width, channels
-    percentage_masking = severity * 0.14
+    percentage_masking = severity * 0.1
     mask = (np.random.rand(shape[0],shape[1],1)>percentage_masking).repeat(shape[2], axis=2).astype(float)
     color = np.random.randint(low = 0, high =255,size=(shape[0],shape[1],shape[2]), dtype = int)
     # color = color.repeat(shape[0], axis = 0).repeat(shape[1],axis=1)
@@ -388,7 +388,7 @@ def masking_random_color_random(x, severity = 1):
 
 def masking_vline_random_color(x, severity = 1):
     shape = np.array(x).shape # heigth, width, channels
-    percentage_masking = severity * 0.14
+    percentage_masking = severity * 0.1
     mask = (np.random.rand(1,shape[1],shape[2])>percentage_masking).repeat(shape[0], axis=0).astype(float)
     color = np.random.randint(low = 0, high =255,size=(1,shape[1],shape[2]), dtype = int)
     color = color.repeat(shape[0], axis = 0)
@@ -396,22 +396,24 @@ def masking_vline_random_color(x, severity = 1):
 
 def masking_hline_random_color(x, severity = 1):
     shape = np.array(x).shape # heigth, width, channels
-    percentage_masking = severity * 0.14
+    percentage_masking = severity * 0.1
     mask = (np.random.rand(shape[0],1,shape[2])>percentage_masking).repeat(shape[1], axis=1).astype(float)
     color = np.random.randint(low = 0, high =255,size=(shape[0],1,shape[2]), dtype = int)
     color = color.repeat(shape[1],axis=1)
     return (1-mask) * color + mask * x
 
+
 def masking_gaussian_line(x, severity=1):
     shape = np.array(x).shape # heigth, width, channels
-    percentage_masking = severity * 0.14
+    percentage_masking = severity * 0.1
     mask = (np.random.rand(shape[0],shape[1],1)>percentage_masking).repeat(shape[2], axis=2).astype(float)
     filling = 255 * mask
     return np.clip(((1-mask) * filling + mask * x), a_min = 0, a_max = 255.9999).astype(int)
 
+
 def masking_gaussian(x, severity=1):
     shape = np.array(x).shape # heigth, width, channels
-    percentage_masking = severity * 0.14
+    percentage_masking = severity * 0.1
     mask = (np.random.rand(shape[0],shape[1],1)>percentage_masking).repeat(shape[2], axis=2).astype(float)
     filling = 255 * np.random.randn(shape[0],shape[1],shape[2])  
     return np.clip(((1-mask) * filling + mask * x), a_min = 0, a_max = 255.9999).astype(int)
@@ -420,7 +422,7 @@ def masking_color_lines(x, severity=1):
     # heigth, width, channels
     x = torch.from_numpy(np.array(x))
     shape = x.shape
-    percentage_masking = severity * 0.14
+    percentage_masking = severity * 0.1
     mask = (torch.rand(1,shape[1],shape[2])>percentage_masking).repeat(shape[0],1,1)
     mask = mask.float()
     color = torch.rand((shape[0],1,1))

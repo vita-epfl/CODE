@@ -68,6 +68,14 @@ def setup_for_distributed(is_master):
 
     __builtin__.print = print
 
+def init_local_single_gpu_mode(cfg: DictConfig) -> DictConfig:
+    with open_dict(cfg):
+        cfg.trainer.rank = 0
+        cfg.trainer.world_size = 1
+        cfg.trainer.gpu = 0 
+        torch.cuda.set_device(cfg.trainer.gpu)
+    return cfg
+
 
 def init_local_distributed_mode(cfg: DictConfig) -> DictConfig:
     with open_dict(cfg):  # add to config
@@ -81,6 +89,7 @@ def init_local_distributed_mode(cfg: DictConfig) -> DictConfig:
             # Naive launch
             # we manually add MASTER_ADDR and MASTER_PORT to env variables
             cfg.trainer.rank, cfg.trainer.gpu, cfg.trainer.world_size = 0, 0, 1
+
             os.environ["MASTER_ADDR"] = "127.0.0.1"
             os.environ["MASTER_PORT"] = "29400"
         else:
@@ -114,6 +123,9 @@ class BaseTrainer(object):
         torchaudio.set_audio_backend("sox_io")
         self.cfg = init_local_distributed_mode(self.cfg)
 
+    def setup_local_single_gpu(self) -> None:
+        self.cfg = init_local_single_gpu_mode(self.cfg)
+
     def run(self) -> None:
         self.train()
         # if self.cfg.trainer.mode == "eval":
@@ -135,7 +147,10 @@ class BaseTrainer(object):
         fix_random_seeds(self.cfg.trainer.seed)
         if self.cfg.trainer.platform == "local":
             LOG.info(f"Training platform : {self.cfg.trainer.platform}")
-            self.setup_local()
+            if self.cfg.trainer.single_gpu:
+                self.setup_local_single_gpu()
+            else:
+                self.setup_local()
         elif self.cfg.trainer.platform == "slurm":
             LOG.info(f"Training platform : {self.cfg.trainer.platform}")
             self.setup_slurm()

@@ -8,7 +8,7 @@ from ddpm.trainers.audio_trainer import AudioTrainer
 from ddpm.trainers.cityscape_trainer import Cityscape_Trainer
 from ddpm.utils.utils import get_output_dir
 from ddpm.trainers.ddib_based_trainer import DDIB_Trainer
-
+from ddpm.trainers.hugginface_based_trainer import Hugginface_Trainer
 LOG = logging.getLogger(__name__)
 
 
@@ -21,6 +21,8 @@ def main(cfg: DictConfig) -> int:
         trainer = DDIB_Trainer(cfg)
     elif cfg.trainer.type == "cityscape" :
         trainer = DDIB_Trainer(cfg)
+    elif cfg.trainer.type == "hugginface":
+        trainer = Hugginface_Trainer(cfg)
         # trainer = Cityscape_Trainer(cfg)
     else:
         raise NotImplementedError
@@ -32,7 +34,10 @@ def main(cfg: DictConfig) -> int:
         LOG.info(f"Output directory {cfg.trainer.logdir}/{cfg.trainer.sync_key}")
         trainer.setup_platform()
         trainer.setup_trainer()
-        trainer.test_and_output()
+        if cfg.trainer.qualitative_experiment:
+            trainer.run_qualitative_experiments()
+        else:
+            trainer.run_experiments()
         return 0
     else:
         raise NotImplementedError
