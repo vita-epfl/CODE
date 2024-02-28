@@ -130,9 +130,9 @@ class DistortImageFolder(data.Dataset):
 import skimage as sk
 from skimage.filters import gaussian
 from io import BytesIO
-from wand.image import Image as WandImage
-from wand.api import library as wandlibrary
-import wand.color as WandColor
+# from wand.image import Image as WandImage
+# from wand.api import library as wandlibrary
+# import wand.color as WandColor
 import ctypes
 from PIL import Image as PILImage
 import cv2
@@ -166,17 +166,17 @@ def disk(radius, alias_blur=0.1, dtype=np.float32):
     return cv2.GaussianBlur(aliased_disk, ksize=ksize, sigmaX=alias_blur)
 
 
-# Tell Python about the C method
-wandlibrary.MagickMotionBlurImage.argtypes = (ctypes.c_void_p,  # wand
-                                              ctypes.c_double,  # radius
-                                              ctypes.c_double,  # sigma
-                                              ctypes.c_double)  # angle
+# # Tell Python about the C method
+# wandlibrary.MagickMotionBlurImage.argtypes = (ctypes.c_void_p,  # wand
+#                                               ctypes.c_double,  # radius
+#                                               ctypes.c_double,  # sigma
+#                                               ctypes.c_double)  # angle
 
 
-# Extend wand.image.Image class to include method signature
-class MotionImage(WandImage):
-    def motion_blur(self, radius=0.0, sigma=0.0, angle=0.0):
-        wandlibrary.MagickMotionBlurImage(self.wand, radius, sigma, angle)
+# # Extend wand.image.Image class to include method signature
+# class MotionImage(WandImage):
+#     def motion_blur(self, radius=0.0, sigma=0.0, angle=0.0):
+#         wandlibrary.MagickMotionBlurImage(self.wand, radius, sigma, angle)
 
 
 # modification of https://github.com/FLHerne/mapgen/blob/master/diamondsquare.py
@@ -366,13 +366,13 @@ def zoom_blur(x, severity=1):
 
 def masking_simple(x, severity=1):
     shape = np.array(x).shape # heigth, width, channels
-    percentage_masking = severity * 0.14
+    percentage_masking = severity * 0.08
     mask = (np.random.rand(shape[0],shape[1],1)>percentage_masking).repeat(shape[2], axis=2).astype(float)
     return x * mask
 
 def masking_random_color(x, severity = 1):
     shape = np.array(x).shape # heigth, width, channels
-    percentage_masking = severity * 0.1
+    percentage_masking = severity * 0.08
     mask = (np.random.rand(shape[0],shape[1],1)>percentage_masking).repeat(shape[2], axis=2).astype(float)
     color = np.random.randint(low = 0, high =255,size=(1,1,shape[2]), dtype = int)
     color = color.repeat(shape[0], axis = 0).repeat(shape[1],axis=1)
@@ -380,7 +380,7 @@ def masking_random_color(x, severity = 1):
 
 def masking_random_color_random(x, severity = 1):
     shape = np.array(x).shape # heigth, width, channels
-    percentage_masking = severity * 0.1
+    percentage_masking = severity * 0.08
     mask = (np.random.rand(shape[0],shape[1],1)>percentage_masking).repeat(shape[2], axis=2).astype(float)
     color = np.random.randint(low = 0, high =255,size=(shape[0],shape[1],shape[2]), dtype = int)
     # color = color.repeat(shape[0], axis = 0).repeat(shape[1],axis=1)
@@ -388,7 +388,7 @@ def masking_random_color_random(x, severity = 1):
 
 def masking_vline_random_color(x, severity = 1):
     shape = np.array(x).shape # heigth, width, channels
-    percentage_masking = severity * 0.1
+    percentage_masking = severity * 0.08
     mask = (np.random.rand(1,shape[1],shape[2])>percentage_masking).repeat(shape[0], axis=0).astype(float)
     color = np.random.randint(low = 0, high =255,size=(1,shape[1],shape[2]), dtype = int)
     color = color.repeat(shape[0], axis = 0)
@@ -396,7 +396,7 @@ def masking_vline_random_color(x, severity = 1):
 
 def masking_hline_random_color(x, severity = 1):
     shape = np.array(x).shape # heigth, width, channels
-    percentage_masking = severity * 0.1
+    percentage_masking = severity * 0.08
     mask = (np.random.rand(shape[0],1,shape[2])>percentage_masking).repeat(shape[1], axis=1).astype(float)
     color = np.random.randint(low = 0, high =255,size=(shape[0],1,shape[2]), dtype = int)
     color = color.repeat(shape[1],axis=1)
@@ -405,7 +405,7 @@ def masking_hline_random_color(x, severity = 1):
 
 def masking_gaussian_line(x, severity=1):
     shape = np.array(x).shape # heigth, width, channels
-    percentage_masking = severity * 0.1
+    percentage_masking = severity * 0.08
     mask = (np.random.rand(shape[0],shape[1],1)>percentage_masking).repeat(shape[2], axis=2).astype(float)
     filling = 255 * mask
     return np.clip(((1-mask) * filling + mask * x), a_min = 0, a_max = 255.9999).astype(int)
@@ -413,7 +413,7 @@ def masking_gaussian_line(x, severity=1):
 
 def masking_gaussian(x, severity=1):
     shape = np.array(x).shape # heigth, width, channels
-    percentage_masking = severity * 0.1
+    percentage_masking = severity * 0.08
     mask = (np.random.rand(shape[0],shape[1],1)>percentage_masking).repeat(shape[2], axis=2).astype(float)
     filling = 255 * np.random.randn(shape[0],shape[1],shape[2])  
     return np.clip(((1-mask) * filling + mask * x), a_min = 0, a_max = 255.9999).astype(int)
@@ -422,7 +422,7 @@ def masking_color_lines(x, severity=1):
     # heigth, width, channels
     x = torch.from_numpy(np.array(x))
     shape = x.shape
-    percentage_masking = severity * 0.1
+    percentage_masking = severity * 0.08
     mask = (torch.rand(1,shape[1],shape[2])>percentage_masking).repeat(shape[0],1,1)
     mask = mask.float()
     color = torch.rand((shape[0],1,1))
@@ -433,7 +433,7 @@ def masking_line(x, severity=1):
     x = np.array(x)
     
     shape = x.shape # heigth, width, channels
-    percentage_masking = severity * 0.1
+    percentage_masking = severity * 0.08
     mask_h = (np.random.rand(1,shape[1],1)>percentage_masking).repeat(shape[0], axis = 0).repeat(shape[2], axis = 2).astype(float)
     mask_v = (np.random.rand(shape[0],1,1)>percentage_masking).repeat(shape[1], axis=1).repeat(shape[2], axis = 2).astype(float)
     return mask_h*mask_v*x
