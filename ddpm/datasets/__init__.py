@@ -299,17 +299,18 @@ def get_dataset(args, cfg):
         with open_dict(test_cfg):
             test_cfg.trainer.split = "val"
         test_dataset = Imagenet_Dataset(test_cfg, transform = train_transform)
+
     elif dataset_name == "LSUN":
-        train_folder = "{}_train".format(config.data.category)
-        val_folder = "{}_val".format(config.data.category)
-        if config.data.random_flip:
+        train_folder = "{}_train".format(cfg.trainer.lsun_category)
+        val_folder = "{}_val".format(cfg.trainer.lsun_category)
+        if cfg.trainer.random_flip:
             dataset = LSUN(
-                root=os.path.join(args.exp, "datasets", "lsun"),
+                root=cfg.trainer.datapath, #os.path.join(args.exp, "datasets", "lsun"),
                 classes=[train_folder],
                 transform=transforms.Compose(
                     [
-                        transforms.Resize(config.data.image_size),
-                        transforms.CenterCrop(config.data.image_size),
+                        transforms.Resize(cfg.trainer.img_size),
+                        transforms.CenterCrop([cfg.trainer.img_size,cfg.trainer.img_size]),
                         transforms.RandomHorizontalFlip(p=0.5),
                         transforms.ToTensor(),
                     ]
@@ -317,24 +318,24 @@ def get_dataset(args, cfg):
             )
         else:
             dataset = LSUN(
-                root=os.path.join(args.exp, "datasets", "lsun"),
+                root= cfg.trainer.datapath, #os.path.join(args.exp, "datasets", "lsun"),
                 classes=[train_folder],
                 transform=transforms.Compose(
                     [
-                        transforms.Resize(config.data.image_size),
-                        transforms.CenterCrop(config.data.image_size),
+                        transforms.Resize(cfg.trainer.img_size),
+                        transforms.CenterCrop([cfg.trainer.img_size,cfg.trainer.img_size]),
                         transforms.ToTensor(),
                     ]
                 ),
             )
 
         test_dataset = LSUN(
-            root=os.path.join(args.exp, "datasets", "lsun"),
+            root= cfg.trainer.datapath ,#os.path.join(args.exp, "datasets", "lsun"),
             classes=[val_folder],
             transform=transforms.Compose(
                 [
-                    transforms.Resize(config.data.image_size),
-                    transforms.CenterCrop(config.data.image_size),
+                    transforms.Resize(cfg.trainer.img_size),
+                    transforms.CenterCrop([cfg.trainer.img_size,cfg.trainer.img_size]),
                     transforms.ToTensor(),
                 ]
             ),

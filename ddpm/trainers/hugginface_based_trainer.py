@@ -172,6 +172,8 @@ class Hugginface_Trainer(BaseTrainer):
             torch.cuda.set_device(self.cfg.trainer.gpu)
 
         self.root = self.cfg.trainer.log_root
+        os.makedirs(self.root, exist_ok=True)
+
         # Get the pipeline, model and its parameters
         self.model_id = self.cfg.trainer.model_id
         self.ddpm = DDPMPipeline.from_pretrained(self.model_id).to(f"cuda:{self.cfg.trainer.gpu}")
@@ -198,6 +200,7 @@ class Hugginface_Trainer(BaseTrainer):
         
 
         LOG.info(f"train dataset length {len(self.train_dataset)}")
+        LOG.info(f"test dataset length {len(self.test_dataset)}")
 
 
 
@@ -380,13 +383,14 @@ class Hugginface_Trainer(BaseTrainer):
         if image is None:
             if random_sampling:
                 number = np.random.randint(1,29999)
-                img_path = f"{self.root}/CelebAMask-HQ/CelebA-HQ-img/{number}.jpg"
+                # img_path = f"{self.root}/CelebAMask-HQ/CelebA-HQ-img/{number}.jpg"
+                img_path = f"{self.cfg.trainer.datapath}/{number}.jpg"
                 img_pil = PIL.Image.open(img_path).resize([256,256])
 
             else:
-                img_path = f"{self.root}/CelebAMask-HQ/CelebA-HQ-img/{number}.jpg"
+                img_path = f"{self.cfg.trainer.datapath}/{number}.jpg"
                 img_pil = PIL.Image.open(img_path).resize([256,256])
-            corrupted_sample = PIL.Image.fromarray(self.corruptions_functions[corruption](img_pil, severity  = 5).astype(np.uint8))
+            corrupted_sample = PIL.Image.fromarray(self.corruptions_functions[corruption](img_pil, severity  = 5).astype(np.uint8)).resize([256,256])
             img_tensor = (torch.from_numpy(np.array(corrupted_sample)).permute(2,0,1)/255)*2-1
             original = (torch.from_numpy(np.array(img_pil)).permute(2,0,1)/255)*2-1
             img_list.append(img_tensor)
@@ -402,7 +406,7 @@ class Hugginface_Trainer(BaseTrainer):
                     original_list.append(original)
             else:
                 img_pil = (transforms.functional.to_pil_image(image/2+0.5)).resize([256,256])
-                corrupted_sample = PIL.Image.fromarray(self.corruptions_functions[corruption](img_pil, severity  = 5).astype(np.uint8))
+                corrupted_sample = PIL.Image.fromarray(self.corruptions_functions[corruption](img_pil, severity  = 5).astype(np.uint8)).resize([256,256])
                 img_tensor = (torch.from_numpy(np.array(corrupted_sample)).permute(2,0,1)/255)*2-1
                 original = (torch.from_numpy(np.array(img_pil)).permute(2,0,1)/255)*2-1
                 img_list.append(img_tensor)
@@ -425,11 +429,11 @@ class Hugginface_Trainer(BaseTrainer):
         epsilon = epsilon
         if t_start > 99 + corrector_step and corrector_step > 1:
             correction_latents = np.linspace(99, np.max(t_valid), corrector_step).astype(int).tolist()
-            epsilon_correction = np.geomspace(1,10,1000)[::-1] 
+            epsilon_correction = np.geomspace(1,100,1000)[::-1] 
             epsilon_correction = epsilon_correction / epsilon_correction[np.max(t_valid)]
         else:
             correction_latents = [np.max(t_valid)]
-        print(f"correction_latents {correction_latents}")
+        # print(f"correction_latents {correction_latents}")
         with torch.no_grad():
             if self.cfg.trainer.normalize and np.max(t_valid) == len(latent_codes) - 1:
                 inputs = (latent_codes[np.max(t_valid)] - latent_codes[np.max(t_valid)].mean([1,2,3],keepdim=True))/latent_codes[np.max(t_valid)].std([1,2,3], keepdim=True)
@@ -558,11 +562,11 @@ class Hugginface_Trainer(BaseTrainer):
             # print('number_of_images', number_of_images)
             img_list = []
             original_list = []
-            if number_of_images > 0:
-                subset = np.random.choice(corruptions_list, number_of_images, replace=False)
-            else:
-                number_of_images = len(corruptions_list)
-                subset = corruptions_list
+            # if number_of_images > 0:
+            #     subset = np.random.choice(corruptions_list, number_of_images, replace=False)
+            # else:
+            #     number_of_images = len(corruptions_list)
+            subset = corruptions_list
             
             # print(f'subset length {len(subset)}')
             corruptions_order = []
@@ -584,135 +588,162 @@ class Hugginface_Trainer(BaseTrainer):
     @torch.no_grad()
     def run_qualitative_experiments(self,number_of_image = 1, corruptions = 'all', sde_range = [99,800,100], 
                             ode_range = [99, 1000, 100], number_of_sample = 3, celebaHQ = True):
-        # number_of_image = self.cfg.trainer.number_of_image or number_of_image
+        number_of_image = self.cfg.trainer.number_of_image or number_of_image
         ode_range = self.cfg.trainer.ode_range or ode_range
+        sde_range = self.cfg.trainer.sde_range or sde_range
         number_of_sample = self.cfg.trainer.number_of_sample or number_of_sample
         if celebaHQ:
-            all_numbers = range(len(self.train_dataset))
+            if self.cfg.trainer.use_val:
+                try:
+                    all_numbers = range(len(self.test_dataset))
+                    assert len(all_numbers)>0
+                except:
+                    LOG.info("Using train set instead.")
+                    with open_dict(self.cfg):
+                        self.cfg.trainer.use_val = False
+                    all_numbers = range(len(self.train_dataset))
+            else:
+                all_numbers = range(len(self.train_dataset))
             images_numbers = np.random.choice(all_numbers, number_of_image)
+            
+        if self.cfg.trainer.image_number is not None:
+            images_numbers = np.array([self.cfg.trainer.image_number])
 
-        sde_model, sde_betas, sde_num_timesteps, sde_logvar = load_model(device=f"cuda:{self.cfg.trainer.gpu}")
-        self.subset_dataset = Subset(self.train_dataset, list(images_numbers))
+        sde_model, sde_betas, sde_num_timesteps, sde_logvar = load_model(model_id = self.cfg.trainer.model_id, device=f"cuda:{self.cfg.trainer.gpu}")
+        if self.cfg.trainer.use_val:
+            self.subset_dataset = Subset(self.test_dataset, list(images_numbers))
+        else:
+            self.subset_dataset = Subset(self.train_dataset, list(images_numbers))
+        print(f"{self.cfg.trainer.gpu} : {list(images_numbers)[:2]}")
+        # print(list(images_numbers))
         LOG.info(f"SubDataset length {len(self.subset_dataset)} ")
         print("sync_key", self.cfg.trainer.sync_key)
-        directory_clean_original = f"{self.root}/ODEDIT/qualitative/{self.cfg.trainer.sync_key}/original/"
-        directory_corrupted = f"{self.root}/ODEDIT/qualitative/{self.cfg.trainer.sync_key}/corrupted"
-        directory_reconstruction_sde =  f"{self.root}/ODEDIT/qualitative/{self.cfg.trainer.sync_key}/sde"
-        directory_reconstruction_ode =  f"{self.root}/ODEDIT/qualitative/{self.cfg.trainer.sync_key}/ode"
-        directory_latent = f"{self.root}/ODEDIT/qualitative/{self.cfg.trainer.sync_key}/latent"
-        os.makedirs(directory_clean_original, exist_ok=True)
-        os.makedirs(directory_corrupted, exist_ok=True)
-        os.makedirs(directory_reconstruction_sde, exist_ok=True)
-        os.makedirs(directory_reconstruction_ode, exist_ok=True)
+        directory_base = f"{self.root}/ODEDIT/qualitative"
+        directory_latent = f"{self.root}/ODEDIT/qualitative/latent"
         os.makedirs(directory_latent, exist_ok=True)
+        os.makedirs(directory_base, exist_ok=True)
 
-         
         self.dataloader = create_dataloader(self.subset_dataset,
                                         rank=self.cfg.trainer.rank,
                                         max_workers=self.cfg.trainer.num_workers,
                                         world_size=self.cfg.trainer.world_size,
-                                        batch_size=self.cfg.trainer.batch_size,
+                                        batch_size=1,
                                         shuffle=False,
                                         single_gpu = self.cfg.trainer.single_gpu
                                         )
         LOG.info(f"Dataloader length {len(self.dataloader)} on GPU: {self.cfg.trainer.gpu}")
-        LOG.info(f"Dataloader length {len(self.dataloader)} on GPU: {self.cfg.trainer.gpu}")
-
+        
+        # for rcp in case of crash
+        if os.path.exists(f"{directory_base}/checkpoint_state.p"):
+            ckpt_dict = pickle.load(open(f"{directory_base}/checkpoint_state.p","rb"))
+            current_index = ckpt_dict['index']
+            current_epsilon = ckpt_dict['epsilon']
+            run_sdedit = ckpt_dict['run_sdedit']
+            ckpt_dict = {'index':current_index, 'epsilon':current_epsilon, 'run_sdedit':run_sdedit}
+        else:
+            current_index = 0
+            current_epsilon = 0
+            run_sdedit = True
+            ckpt_dict = {'index':current_index, 'epsilon':current_epsilon, 'run_sdedit':run_sdedit}
 
         epsilons = np.geomspace(self.cfg.trainer.min_epsilon,self.cfg.trainer.max_epsilon, self.cfg.trainer.number_of_epsilons)
         list_steps = [self.cfg.trainer.number_of_steps]
+
         LOG.info(f"Starting Dataloader loop.")
         for k, (_, img_batch, indexes) in enumerate(self.dataloader):
-            index_list = indexes.tolist()
-            img_tensor, original, corruptions_order = self.batch_for_single_image_experiments(img_batch, number = k)
-            img_tensor = img_tensor.cuda(self.cfg.trainer.gpu)
-            original = original.cuda(self.cfg.trainer.gpu)
-            # print('shape',img_tensor.shape)
-            for i,image in enumerate(img_tensor):
-                save_image(img_tensor[i].cpu()/2+0.5,directory_corrupted+f"/{i}_{self.cfg.trainer.gpu}.png")
-                save_image(original[i].cpu()/2+0.5,directory_clean_original+f"/{i}_{self.cfg.trainer.gpu}.png")
-            if self.cfg.trainer.gpu == 0:
-                grid_corrupted = make_grid(img_tensor.cpu().detach())
-                grid_original = make_grid(original.cpu().detach())
-                img_grid_corrupted = wandb.Image(grid_corrupted.permute(1,2,0).numpy())
-                img_grid_original= wandb.Image(grid_original.permute(1,2,0).numpy())
-                wandb.log({f"Corruption_{corruptions_order}": img_grid_corrupted},commit=True)
-                wandb.log({f"Original": img_grid_original},commit=True)
+            if k >= current_index:
+                current_index = k
+                torch.cuda.empty_cache()
+                index_list = indexes.tolist()
 
-            # for latent in range(sde_range[0],sde_range[1], sde_range[2]):
-            #     sample_step = 1
-            #     directory_reconstruction_sde_latent_corruption = f"{directory_reconstruction_sde}/latent_{latent}"
-            #     os.makedirs(directory_reconstruction_sde_latent_corruption, exist_ok=True)
-            #     results = SDEditing(img_tensor, sde_betas, sde_logvar, sde_model, sample_step, latent, n=number_of_sample, huggingface = True)
-            #     results_normalized = results / 2 + 0.5
-            #     for n, image in enumerate(results_normalized):
-            #         save_image(image.cpu(), directory_reconstruction_sde_latent_corruption+f"/{n}_{self.cfg.trainer.gpu}.png")
-            #     if self.cfg.trainer.gpu == 0:
-            #         grid_reco_sde = make_grid(results_normalized.cpu().detach())
-            #         img_grid_reco_sde = wandb.Image(grid_reco_sde.permute(1,2,0).numpy())
-            #         wandb.log({f"SDE_Reconstruction_{latent}_{n}": img_grid_reco_sde},commit=True)
+                if self.cfg.trainer.image_number is None:
+                    img_tensor, original, corruptions_order = self.batch_for_single_image_experiments(img_batch, number = k)
+                else:
+                    k = self.cfg.trainer.image_number
+                    img_tensor, original, corruptions_order = self.batch_for_single_image_experiments(None, number = k)
+                img_tensor = img_tensor.cuda(self.cfg.trainer.gpu)
+                original = original.cuda(self.cfg.trainer.gpu)
+                index_directory = []
+                for i,corr in enumerate(corruptions_order):
+                    counter = 0
+                    while os.path.isdir(f"{directory_base}/{corruptions_order[i]}/{index_list[0]}_{counter}"):
+                        counter +=1
+                    index_directory.append(f"{directory_base}/{corruptions_order[i]}/{index_list[0]}_{counter}")
+                    os.makedirs(f"{directory_base}/{corruptions_order[i]}/{index_list[0]}_{counter}", exist_ok=True)
+                    os.makedirs(f"{directory_base}/{corruptions_order[i]}/{index_list[0]}_{counter}/sde", exist_ok=True)
+                    os.makedirs(f"{directory_base}/{corruptions_order[i]}/{index_list[0]}_{counter}/ode", exist_ok=True)
+                for i,image in enumerate(img_tensor):
+                    save_image(img_tensor[i].cpu()/2+0.5,f"{index_directory[i]}/corrupted_{self.cfg.trainer.gpu}.png")
+                    if i == 0:
+                        save_image(original[i].cpu()/2+0.5,f"{index_directory[i]}/original_{self.cfg.trainer.gpu}.png") 
+                if self.cfg.trainer.gpu == 0:
+                    grid_corrupted = make_grid(img_tensor.cpu().detach())
+                    grid_original = make_grid(original.cpu().detach())
+                    img_grid_corrupted = wandb.Image(grid_corrupted.permute(1,2,0).numpy())
+                    img_grid_original= wandb.Image(grid_original.permute(1,2,0).numpy())
+                    wandb.log({f"Corruption_{[corr[:5] for corr in corruptions_order]}": img_grid_corrupted},commit=True)
+                    wandb.log({f"Original": img_grid_original},commit=True)
+            
+                if self.cfg.trainer.run_sdedit and run_sdedit:
+                    for latent in range(sde_range[0],sde_range[1], sde_range[2]):
+                        sample_step = 1
+                        results = SDEditing(img_tensor, sde_betas, sde_logvar, sde_model, sample_step, latent, n=number_of_sample, huggingface = True)
+                        results_normalized = results / 2 + 0.5
+                        samples = torch.stack(results_normalized.split(number_of_sample, dim=0))
+                        for k, corruption_samples in enumerate(samples):
+                            for sample_index, sample in enumerate(corruption_samples):
+                                save_image(sample.cpu(), f"{index_directory[k]}/sde/{latent}_{sample_index}_{self.cfg.trainer.gpu}.png")
+                        if self.cfg.trainer.gpu == 0:
+                            grid_reco_sde = make_grid(results_normalized.cpu().detach())
+                            img_grid_reco_sde = wandb.Image(grid_reco_sde.permute(1,2,0).numpy())
+                            wandb.log({f"SDE_Reconstruction_{latent}": img_grid_reco_sde},commit=True)
+                        torch.cuda.empty_cache()
+                run_sdedit = False
+                ckpt_dict = {'index':current_index, 'epsilon':current_epsilon, 'run_sdedit':run_sdedit}
+                pickle.dump(ckpt_dict,open(f"{directory_base}/checkpoint_state.p",'wb'))
+
                 
 
-            #run ode
-            latent_codes, _, _ = self.encode_inputs(img_tensor)
-            print("latent codes", len(latent_codes))
-            for latent in range(ode_range[0], ode_range[1], ode_range[2]):
-                directory_reconstruction_ode_latent_corruption = f"{directory_reconstruction_ode}/latent_{latent}"
-                os.makedirs(directory_reconstruction_ode_latent_corruption, exist_ok=True)
+                #run ode
+                latent_codes, _, _ = self.encode_inputs(img_tensor)
+                for latent in range(ode_range[0], ode_range[1], ode_range[2]):
+                    if self.cfg.trainer.gpu == 0:
+                        grid_latent = make_grid(torch.clamp(latent_codes[latent].cpu().detach(),-1,1))
+                        img_grid_latent = wandb.Image(grid_latent.permute(1,2,0).numpy())
+                        wandb.log({f"Latent_{latent}": img_grid_latent},commit=True)
 
-                for i,image_index in enumerate(index_list):
-                    save_image(latent_codes[latent][i].cpu()/2+0.5, f"{directory_reconstruction_ode_latent_corruption}/{image_index}.png")
-                if self.cfg.trainer.gpu == 0:
-                    grid_latent = make_grid(torch.clamp(latent_codes[latent].cpu().detach(),-1,1))
-                    img_grid_latent = wandb.Image(grid_latent.permute(1,2,0).numpy())
-                    wandb.log({f"Latent_{latent}": img_grid_latent},commit=True)
+                    ## To define --> Probably fix steps with different epsilon
+                    for number_of_steps in list_steps:
+                        for l, epsilon in enumerate(epsilons):
+                            if l >= current_epsilon or self.cfg.trainer.run_all_epsilon:
+                                current_epsilon = l
+                                list_of_evolution_reverse, samples = self.editing_with_ode(latent_codes, self.ddpm.unet, t_start = latent, 
+                                            std_div = -1, epsilon = epsilon, steps = number_of_steps, power =0.5, 
+                                            number_of_sample = number_of_sample,
+                                            corrector_step = self.cfg.trainer.number_of_latents_corrected,
+                                            deep_correction=False, comparison = False)
+                                samples_stacked = torch.stack(samples)
 
-                ## To define --> Probably fix steps with different epsilon
-                for number_of_steps in list_steps:
-                    for epsilon in epsilons:
-                        for _, image_index in enumerate(index_list):
-                            os.makedirs(f"{directory_reconstruction_ode_latent_corruption}/{image_index}/{number_of_steps}_{round(epsilon,6)}", exist_ok = True)
-                        list_of_evolution_reverse, samples = self.editing_with_ode(latent_codes, self.ddpm.unet, t_start = latent, 
-                                    std_div = -1, epsilon = epsilon, steps = number_of_steps, power =0.5, 
-                                    number_of_sample = number_of_sample,
-                                    corrector_step = self.cfg.trainer.number_of_latents_corrected,
-                                    deep_correction=False, comparison = False)
-                        samples_stacked = torch.stack(samples)
-                        if self.cfg.trainer.batch_size > 1:
-                            samples = torch.stack(samples_stacked.split(number_of_sample, dim=0)) 
-                            for sample_index, image_index in enumerate(index_list):
-                                for m in range(number_of_sample):
-                                    save_image(samples[sample_index][m].cpu()/2+0.5, 
-                                        f"{directory_reconstruction_ode_latent_corruption}/{image_index}/{number_of_steps}_{round(epsilon,6)}/{m}_{self.cfg.trainer.gpu}.png")
-                            if self.cfg.trainer.gpu == 0:
-                                grid_reco = make_grid(samples_stacked.cpu().detach())
-                                img_grid_reco= wandb.Image(grid_reco.permute(1,2,0).numpy())
-                                wandb.log({f"Reconstruction_l{latent}_e{round(epsilon,6)}_{image_index}": img_grid_reco},commit=True)
-                        else:
-                            for sample_index, image_index in enumerate(index_list):
-                                for m in range(number_of_sample):
-                                    save_image(samples_stacked[m].cpu()/2+0.5, 
-                                        f"{directory_reconstruction_ode_latent_corruption}/{image_index}/{number_of_steps}_{round(epsilon,6)}/{m}_{self.cfg.trainer.gpu}.png")
-                            if self.cfg.trainer.gpu == 0:
-                                grid_reco = make_grid(samples_stacked.cpu().detach())
-                                img_grid_reco= wandb.Image(grid_reco.permute(1,2,0).numpy())
-                                wandb.log({f"Reconstruction_l{latent}_e{round(epsilon,6)}_{image_index}": img_grid_reco},commit=True)
+                                samples = torch.stack(samples_stacked.split(number_of_sample, dim=0)) / 2 + 0.5
+                                for k, corruption_samples in enumerate(samples):
+                                    for sample_index, sample in enumerate(corruption_samples):
+                                        save_image(sample.cpu(), f"{index_directory[k]}/ode/{sample_index}_{number_of_steps}_{round(epsilon,6)}_{self.cfg.trainer.gpu}.png")
+                                if self.cfg.trainer.gpu == 0:
+                                    grid_reco = make_grid(samples_stacked.cpu().detach())
+                                    img_grid_reco= wandb.Image(grid_reco.permute(1,2,0).numpy())
+                                    wandb.log({f"Reconstruction_l{latent}_e{round(epsilon,6)}": img_grid_reco},commit=True)
+                            ckpt_dict = {'index':current_index, 'epsilon':current_epsilon, 'run_sdedit':run_sdedit}
+                            pickle.dump(ckpt_dict,open(f"{directory_base}/checkpoint_state.p",'wb'))
                             
         return
 
 
     @torch.no_grad()
-    def run_experiments(self,number_of_image = 4, corruptions = 'all', sde_range = [99,1000,100], 
+    def run_experiments(self,number_of_image = 4, sde_range = [99,1000,100], 
                             ode_range = [99, 1000, 100], number_of_sample = 4, celebaHQ = True):
         number_of_image = self.cfg.trainer.number_of_image or number_of_image
-        if self.cfg.trainer.corruptions_list is not None:
-            corruptions_list = self.cfg.trainer.corruptions_list
-        elif corruptions == 'all':
-            corruptions_list = ["motion_blur", "frost","speckle_noise","impulse_noise","shot_noise","jpeg_compression","pixelate","brightness",
-                            "fog","saturate","gaussian_noise",'elastic_transform','snow','masking_vline_random_color','spatter', 
-                            'glass_blur','gaussian_blur','contrast', "masking_random_color"]
-        else:
-            corruptions_list = [corruptions]
+        corruptions_list = self.corruptions_list
+
         if celebaHQ:
             all_numbers = range(len(self.train_dataset))
             images_numbers = np.random.choice(all_numbers, number_of_image)
@@ -740,6 +771,19 @@ class Hugginface_Trainer(BaseTrainer):
                                         )
         LOG.info(f"Dataloader length {len(self.dataloader)} on GPU: {self.cfg.trainer.gpu}")
 
+        ## HARD CODED FOR FASTNESS BASED ON EXPERIENCE
+        dictionnary_corruption_latent = {"frost": [199,999], 
+                                        "speckle_noise": [199,999],
+                                        'impulse_noise':[199,999], 
+                                        "shot_noise":[199,999], 
+                                        "fog":[999],
+                                        'snow':[199,999], 
+                                        'masking_vline_random_color':[199,999], 
+                                        'spatter':[199,999], 
+                                        'contrast':[999], 
+                                        'masking_random_color':[999]}
+                                        
+        dictionnary_corruption_epsilon = {}
 
         epsilons = np.geomspace(self.cfg.trainer.min_epsilon,self.cfg.trainer.max_epsilon, self.cfg.trainer.number_of_epsilons)
 
@@ -772,9 +816,21 @@ class Hugginface_Trainer(BaseTrainer):
                     wandb.log({f"Corruption_{corruption}": img_grid_corrupted},commit=True)
                     if l == 0:
                         wandb.log({f"Original": img_grid_original},commit=True)
-                for latent in range(sde_range[0],sde_range[1], sde_range[2]):
-                    directory_reconstruction_sde_latent_corruption = f"{directory_reconstruction_sde}/latent_{latent}/{corruption}/{k}"
-                    pass
+
+                if self.cfg.trainer.run_sdedit:
+                    for latent in range(sde_range[0],sde_range[1], sde_range[2]):
+                        directory_reconstruction_sde_latent_corruption = f"{directory_reconstruction_sde}/latent_{latent}/{corruption}/{k}"
+                        sample_step = 1
+                        directory_reconstruction_sde_latent_corruption = f"{directory_reconstruction_sde}/latent_{latent}"
+                        os.makedirs(directory_reconstruction_sde_latent_corruption, exist_ok=True)
+                        results = SDEditing(img_tensor, sde_betas, sde_logvar, sde_model, sample_step, latent, n=number_of_sample, huggingface = True)
+                        results_normalized = results / 2 + 0.5
+                        for n, image in enumerate(results_normalized):
+                            save_image(image.cpu(), directory_reconstruction_sde_latent_corruption+f"/{n}_{self.cfg.trainer.gpu}.png")
+                        if self.cfg.trainer.gpu == 0:
+                            grid_reco_sde = make_grid(results_normalized.cpu().detach())
+                            img_grid_reco_sde = wandb.Image(grid_reco_sde.permute(1,2,0).numpy())
+                            wandb.log({f"SDE_Reconstruction_{latent}_{n}": img_grid_reco_sde},commit=True)
 
                 #run ode
                 latent_codes, _, _ = self.encode_inputs(img_tensor)
@@ -838,7 +894,7 @@ class Hugginface_Trainer(BaseTrainer):
 
         sample_step = 1
         if celebahq:
-            model, betas, num_timesteps, logvar = load_model(device=f"cuda:{self.cfg.trainer.gpu}")
+            model, betas, num_timesteps, logvar = load_model(model_id = self.cfg.trainer.model_id, device=f"cuda:{self.cfg.trainer.gpu}")
         else:
             model = self.ema_model
             betas = th.from_numpy(self.diffusion.betas)

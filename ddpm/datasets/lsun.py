@@ -5,6 +5,7 @@ import os.path
 import io
 from collections.abc import Iterable
 import pickle
+import torch
 from torchvision.datasets.utils import verify_str_arg, iterable_to_str
 
 
@@ -166,7 +167,9 @@ class LSUN(VisionDataset):
             target = self.target_transform(target)
 
         img, _ = db[index]
-        return img, target
+        indexes = torch.ones_like(img) * torch.tensor(index)
+        indexes = torch.tensor(index).int()
+        return target, img, indexes
 
     def __len__(self):
         return self.length

@@ -88,10 +88,12 @@ def SDEditing(img_tensor, betas, logvar, model, sample_step, total_noise_levels,
         img = img.to(device)
         if len(img.shape) < 4:
             img = img.unsqueeze(dim=0)
-            
-            img = img.repeat(n, 1, 1, 1)
         else:
             img = img
+        inputs = img.split(1, dim=0)
+        inputs = [inp.repeat(n, 1, 1, 1) for inp in inputs]
+        img = torch.cat(inputs)
+        # img = img.repeat(n, 1, 1, 1)
         mask = torch.zeros_like(img[0])
         mask = mask.to(device)
         x0 = img

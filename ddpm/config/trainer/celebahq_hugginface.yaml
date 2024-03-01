@@ -22,6 +22,7 @@ corruptions_list: ['fog', 'contrast', 'spatter',"frost","speckle_noise","elastic
                   #"fog","gaussian_blur","elastic_transform", "motion_blur","glass_blur","brightness", "saturate",
                   #'snow', 'masking_vline_random_color', 'spatter', 'contrast', 'masking_random_color']
 split: all
+use_val: false
 num_workers: 4 #help='workers of Dataloader')
 corruption:  #help=corruption type base on Imagenet-C
 corruption_severity:  #help='corruption severity level 1-5'
@@ -32,6 +33,7 @@ img_size: 256 #help='image size')
 
 # Inference
 run_sdedit: true
+run_all_epsilon: true
 number_of_image: 1000
 number_of_sample: 4
 image_number: 
@@ -41,8 +43,8 @@ normalize: false
 normalize_mean: false
 clip_inputs: false
 number_of_stds: 3
-min_epsilon: 1e-4
-max_epsilon: 1e-5
+min_epsilon: 1e-5
+max_epsilon: 1e-4
 number_of_epsilons: 5
 dynamic_thresholding_langevin: true
 dynamic_thresholding_ddim: true

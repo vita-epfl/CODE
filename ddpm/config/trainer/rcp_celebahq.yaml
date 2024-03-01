@@ -32,6 +32,7 @@ img_size: 256 #help='image size')
 
 # Inference
 run_sdedit: true
+run_all_epsilon: true
 number_of_image: 1000
 number_of_sample: 4
 image_number: 
