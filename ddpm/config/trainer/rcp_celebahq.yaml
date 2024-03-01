@@ -58,7 +58,7 @@ number_of_steps: 600
 logdir: ${trainer.log_root}/logs/CelebaHQ #help='log directory')
 wandb_entity: bastienvd #help='wandb id to use')
 ml_exp_name: ${trainer.dataset}_HumanEval_gpu2_correction_${trainer.number_of_latents_corrected} #help = 'name of the experience on wandb')
-
+base_dir: /mnt/nas3_rcp_enac_u0900_vita_scratch/vita-staff/users/bvandelft/ddpm
 
 # UNet
 # input_channel: 3

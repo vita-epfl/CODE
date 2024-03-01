@@ -8,4 +8,4 @@ defaults:
 
 hydra:
   run:
-    dir: ${trainer.output_dir}/${trainer.sync_key}
+    dir: ${trainer.base_dir}

@@ -33,7 +33,7 @@ slurm:
 # INTERNAL
 logdir: ${trainer.results_dir}/${trainer.name}_${dataset.name}
 sync_key: ${now:%Y-%m-%d_%H-%M}
-output_dir: ${trainer.logdir}
+base_dir: ${trainer.logdir}
 
 # Default Checkpointpath
 checkpointpath : ${trainer.logdir}/checkpoint.pt
