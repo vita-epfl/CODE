@@ -186,6 +186,9 @@ class Hugginface_Trainer(BaseTrainer):
         self.dynamic_threshold_max = self.cfg.trainer.dynamic_threshold_max
 
         self.train_dataset, self.test_dataset = get_dataset(None, self.cfg)
+        if self.test_dataset is None:
+            LOG.info(f"test dataset adjusted to train dataset.")
+            self.test_dataset = self.train_dataset
         if not self.cfg.trainer.single_gpu:
             dist.barrier()
         self.corruptions_list = self.cfg.trainer.corruptions_list or ["motion_blur", "frost", "speckle_noise", "impulse_noise", "shot_noise", "jpeg_compression",
