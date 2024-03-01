@@ -11,8 +11,6 @@ import torchvision.transforms as trn
 import torch.utils.data as data
 import numpy as np
 
-# from PIL import Image
-
 # /////////////// Data Loader ///////////////
 
 
@@ -475,9 +473,9 @@ def frost(x, severity=1):
          (0.6, 0.75)][severity - 1]
     idx = np.random.randint(5)
     import os
-    filename = ['/home/bastienvandelft/Projects/ddpm/ddpm/datasets/frost1.png', '/home/bastienvandelft/Projects/ddpm/ddpm/datasets/frost2.png', 
-                '/home/bastienvandelft/Projects/ddpm/ddpm/datasets/frost3.png', '/home/bastienvandelft/Projects/ddpm/ddpm/datasets/frost4.jpg', 
-                    '/home/bastienvandelft/Projects/ddpm/ddpm/datasets/frost5.jpg', '/home/bastienvandelft/Projects/ddpm/ddpm/datasets/frost6.jpg'][idx]
+    filename = [f'./ddpm/datasets/frost1.png', f'./ddpm/datasets/frost2.png', 
+                f'./ddpm/datasets/frost3.png', f'./ddpm/datasets/frost4.jpg', 
+                f'./ddpm/datasets/frost5.jpg', f'./ddpm/datasets/frost6.jpg'][idx]
     frost = cv2.imread(filename)
     # randomly crop and convert to rgb
     shape = np.array(x).shape
