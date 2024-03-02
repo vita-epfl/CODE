@@ -10,14 +10,15 @@ type: hugginface
 test_session: False
 qualitative_experiment: True
 # Model ID hugginface
-model_id: google/ddpm-celebahq-256
+model_id: google/ddpm-ema-celebahq-256
 log_root: /mnt/nas3_rcp_enac_u0900_vita_scratch/vita-staff/users/bvandelft/results #/mnt/scitas/bastien
 
 # Dataset
 datapath: /mnt/nas3_rcp_enac_u0900_vita_scratch/vita-staff/users/bvandelft/CelebAMask-HQ/CelebA-HQ-img #/mnt/scitas/bastien/CelebAMask-HQ/CelebA-HQ-img #help='dataset path if downloaded
 dataset: CELEBAHQ #help='dataset name')
 lsun_category: None # one of ["bedroom","bridge","church_outdoor","classroom","conference_room","dining_room","kitchen","living_room","restaurant","tower",
-corruptions_list: ['fog', 'contrast', 'spatter',"frost","speckle_noise","elastic_transform",'impulse_noise', "shot_noise", "gaussian_noise",'masking_vline_random_color','masking_random_color',"brightness"] 
+corruptions_list: ['fog', 'contrast', 'spatter',"frost","speckle_noise","elastic_transform",'impulse_noise', "shot_noise", "gaussian_noise",
+                  'masking_vline_random_color','masking_random_color',"snow","brightness", "glass_blur", "motion_blur", "gaussian_blur", "pixelate"] 
                   #["frost", "speckle_noise",'impulse_noise', "shot_noise", "gaussian_noise","jpeg_compression","pixelate",
                   #"fog","gaussian_blur","elastic_transform", "motion_blur","glass_blur","brightness", "saturate",
                   #'snow', 'masking_vline_random_color', 'spatter', 'contrast', 'masking_random_color']
@@ -34,27 +35,28 @@ img_size: 256 #help='image size')
 # Inference
 run_sdedit: true
 run_all_epsilon: true
-number_of_image: 1000
+number_of_image: 2000
 number_of_sample: 4
 image_number: 
 batch_size: 1 #help='batch size'
-annealing: 1
+annealing: 10
+annealing_cst: 0.75
 normalize: false 
 normalize_mean: false
 clip_inputs: false
 number_of_stds: 3
-min_epsilon: 1e-4
-max_epsilon: 1e-5
-number_of_epsilons: 5
-dynamic_thresholding_langevin: true
+min_epsilon: 1e-5
+max_epsilon: 5e-4
+number_of_epsilons: 10
+dynamic_thresholding_langevin: false
 dynamic_thresholding_ddim: true
-dynamic_threshol_ratio: 0.95
+dynamic_threshol_ratio: 0.98
 dynamic_threshold_max: 1.3
 number_of_latents_corrected: 2
-ode_range: [999, 1000, 1]
+ode_range: [999, 1000, 2]
 sde_range: [199,500,100]
 # Logging & Sampling
-number_of_steps: 600
+number_of_steps: 1000
 logdir: ${trainer.log_root}/logs/CelebaHQ #help='log directory')
 wandb_entity: bastienvd #help='wandb id to use')
 ml_exp_name: ${trainer.dataset}_HumanEval_gpu2_correction_${trainer.number_of_latents_corrected} #help = 'name of the experience on wandb')

@@ -1,0 +1,13 @@
+data:
+    dataset: "CELEBA"
+    datapath: /mnt/scitas/bastien/ #img_align_celeba
+    corruption: glass_blur
+    corruption_severity: 5
+    image_size: 64
+    channels: 3
+    logit_transform: false
+    uniform_dequantization: false
+    gaussian_dequantization: false
+    random_flip: false
+    rescaled: true
+    num_workers: 4

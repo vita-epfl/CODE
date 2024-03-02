@@ -41,23 +41,24 @@ number_of_image: 1000
 number_of_sample: 4
 image_number: 
 batch_size: 1 #help='batch size'
-annealing: 1
+annealing: 10
+annealing_cst: 0.8
 normalize: false 
 normalize_mean: false
 clip_inputs: false
 number_of_stds: 3
 min_epsilon: 5e-6
-max_epsilon: 2e-4
+max_epsilon: 1e-4
 number_of_epsilons: 10
-dynamic_thresholding_langevin: true
+dynamic_thresholding_langevin: false
 dynamic_thresholding_ddim: true
-dynamic_threshol_ratio: 0.95
+dynamic_threshol_ratio: 0.98
 dynamic_threshold_max: 1.3
 number_of_latents_corrected: 2
 ode_range: [999, 1000, 1]
 sde_range: [199,500,100]
 # Logging & Sampling
-number_of_steps: 600
+number_of_steps: 1000
 logdir: ${trainer.log_root}/logs/LSUN #help='log directory')
 wandb_entity: bastienvd #help='wandb id to use')
 ml_exp_name: ${trainer.dataset}_${trainer.lsun_category}_correction_${trainer.number_of_latents_corrected} #help = 'name of the experience on wandb')

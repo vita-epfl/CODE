@@ -144,7 +144,7 @@ class Hugginface_Trainer(BaseTrainer):
         return min(step, self.cfg.trainer.warmup) / self.cfg.trainer.warmup
 
     def setup_trainer(self) -> None:
-
+        print("directory_setup0", os.getcwd())
         LOG.info(f"{self.cfg.trainer.name}: {self.cfg.trainer.rank}, gpu: {self.cfg.trainer.gpu}")
         warnings.simplefilter(action='ignore', category=FutureWarning)
         os.makedirs(os.path.join(self.cfg.trainer.logdir, 'sample'), exist_ok=True)
@@ -167,7 +167,7 @@ class Hugginface_Trainer(BaseTrainer):
                 wandb.run.save()
         
             self.writer = SummaryWriter(self.cfg.trainer.logdir)
-
+        print("directory_setup", os.getcwd())
         if self.cfg.trainer.gpu is not None:
             torch.cuda.set_device(self.cfg.trainer.gpu)
 
@@ -204,7 +204,7 @@ class Hugginface_Trainer(BaseTrainer):
 
         LOG.info(f"train dataset length {len(self.train_dataset)}")
         LOG.info(f"test dataset length {len(self.test_dataset)}")
-
+        
 
 
     def train(self,) -> None:
@@ -493,7 +493,7 @@ class Hugginface_Trainer(BaseTrainer):
                                 step_per_epsilon = steps // len(range(int(annealing)))
                                 inputs,alpha_coef, list_of_stds, list_of_means = self.langevin_sampling(inputs, t, None, steps = step_per_epsilon, epsilon = new_epsilon,
                                                     min_variance = min_variance, clip_prev = False, clip_now = False,dynamic_thresholding=self.cfg.trainer.dynamic_thresholding_langevin,power = power)
-                                new_epsilon  = new_epsilon / 2
+                                new_epsilon  = new_epsilon * self.cfg.trainer.annealing_cst
    
                         else:
                             inputs,alpha_coef, list_of_stds, list_of_means = self.langevin_sampling(inputs, t, None, steps = steps, epsilon = epsilon,
@@ -516,7 +516,7 @@ class Hugginface_Trainer(BaseTrainer):
                                 step_per_epsilon = steps // len(range(int(annealing)))
                                 inputs,alpha_coef, list_of_stds, list_of_means = self.langevin_sampling(inputs, t, None, steps = step_per_epsilon, epsilon = new_epsilon,
                                                     min_variance = min_variance, clip_prev = False, clip_now = False,dynamic_thresholding=self.cfg.trainer.dynamic_thresholding_langevin,power = power)
-                                new_epsilon  = new_epsilon / 2
+                                new_epsilon  = new_epsilon * annealing_cst
                         else:
                             inputs,alpha_coef, list_of_stds, list_of_means = self.langevin_sampling(inputs, t, None, steps = steps, epsilon = new_epsilon,
                                     min_variance = min_variance, clip_prev = False, clip_now = False,dynamic_thresholding=self.cfg.trainer.dynamic_thresholding_langevin, power = power)  
@@ -649,7 +649,7 @@ class Hugginface_Trainer(BaseTrainer):
             run_sdedit = True
             ckpt_dict = {'index':current_index, 'epsilon':current_epsilon, 'run_sdedit':run_sdedit}
 
-        epsilons = np.geomspace(self.cfg.trainer.min_epsilon,self.cfg.trainer.max_epsilon, self.cfg.trainer.number_of_epsilons)
+        epsilons = np.linspace(self.cfg.trainer.min_epsilon,self.cfg.trainer.max_epsilon, self.cfg.trainer.number_of_epsilons)
         list_steps = [self.cfg.trainer.number_of_steps]
 
         LOG.info(f"Starting Dataloader loop.")
