@@ -15,6 +15,7 @@ qualitative_experiment: True
 # Dataset
 datapath: /home/bastienvandelft/scitas/bastien/lsun #/home/bastienvandelft/Datasets/CelebAMask-HQ/CelebA-HQ-img #/mnt/scitas/bastien/CelebAMask-HQ/CelebA-HQ-img #help='dataset path if downloaded
 dataset: LSUN #help='dataset name')
+exp_name_folder:
 lsun_category: church_outdoor #"bedroom" # one of ["bedroom","bridge","church_outdoor","classroom","conference_room","dining_room","kitchen","living_room","restaurant","tower",
 corruptions_list: ['fog', 'contrast', 'spatter',"frost","speckle_noise","elastic_transform","glass_blur",'impulse_noise', "shot_noise", "gaussian_noise",'masking_vline_random_color','masking_random_color',"brightness"] 
                   #["frost", "speckle_noise",'impulse_noise', "shot_noise", "gaussian_noise","jpeg_compression","pixelate",
@@ -37,6 +38,7 @@ log_root: /home/bastienvandelft/results/lsun/${trainer.lsun_category} #/mnt/scit
 # Inference
 run_sdedit: true
 run_all_epsilon: true
+use_std_schedule: false
 number_of_image: 1000
 number_of_sample: 4
 image_number: 
@@ -55,13 +57,14 @@ dynamic_thresholding_ddim: true
 dynamic_threshol_ratio: 0.98
 dynamic_threshold_max: 1.3
 number_of_latents_corrected: 2
+min_latent_space_update: 99
 ode_range: [999, 1000, 1]
 sde_range: [199,500,100]
 # Logging & Sampling
 number_of_steps: 1000
 logdir: ${trainer.log_root}/logs/LSUN #help='log directory')
 wandb_entity: bastienvd #help='wandb id to use')
-ml_exp_name: ${trainer.dataset}_${trainer.lsun_category}_correction_${trainer.number_of_latents_corrected} #help = 'name of the experience on wandb')
+ml_exp_name: ${trainer.dataset}_${trainer.lsun_category}_folder_${trainer.exp_name_folder} #help = 'name of the experience on wandb')
 base_dir: /home/bastienvandelft/Projects/ddpm
 
 # UNet

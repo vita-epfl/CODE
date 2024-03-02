@@ -12,6 +12,7 @@ test_clip_duration: 3
 
 # This folder should be accessible by all nodes
 results_dir: results
+exp_name_folder: base
 
 use_clearml: false
 use_wandb: true

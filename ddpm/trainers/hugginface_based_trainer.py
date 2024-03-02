@@ -167,7 +167,7 @@ class Hugginface_Trainer(BaseTrainer):
                 wandb.run.save()
         
             self.writer = SummaryWriter(self.cfg.trainer.logdir)
-        print("directory_setup", os.getcwd())
+        LOG.info(f"directory_setup: {os.getcwd()}")
         if self.cfg.trainer.gpu is not None:
             torch.cuda.set_device(self.cfg.trainer.gpu)
 
@@ -420,21 +420,48 @@ class Hugginface_Trainer(BaseTrainer):
         return img_tensor, original
 
 
-    def editing_with_ode(self, latent_codes, model, t_start = 1000, std_div = -1., annealing = False, epsilon = 1e-8, 
-                        steps = 20, power =0.5, 
+    def corrupt_batch(self, images, number=1, corruption='spatter'):
+        # Assuming images is a batch of input images
+
+        # Apply the corruption to each image in the batch
+        corrupted_images = []  # List to store the corrupted images
+        original_images = []  # List to store the original images
+
+        for image in images:
+            # Apply the corruption to a single image
+            corrupted_image, original = self.corrupt(image, number, corruption)
+            
+            # Append the results to the lists
+            corrupted_images.append(corrupted_image)
+            original_images.append(original)
+
+        # Convert the lists to tensors
+        corrupted_images_tensor = torch.stack(corrupted_images)
+        original_images_tensor = torch.stack(original_images)
+
+        return corrupted_images_tensor, original_images_tensor
+
+
+
+    def editing_with_ode(self, latent_codes, model, t_start = 1000, std_div = -1., annealing = False,annealing_cst = 0.8, epsilon = 1e-8, 
+                        steps = 20, power =0.5, min_latent_space_update = 99, 
                         min_variance = -1. , number_of_sample = 1,normalize=False, normalize_mean = False,
-                        corrector_step = 1,deep_correction = False, comparison = False):
+                        corrector_step = 1, use_std_schedule = False):
+        
         alphas_cumprod = self.ddpm.scheduler.alphas_cumprod
+        stds = torch.sqrt(1-alphas_cumprod)
         list_of_evolution_reverse = []
         final_samples = []
         t_valid = list(range(0, min(len(latent_codes)+1,t_start)))
-        std_recon = 1
-        epsilon = epsilon
-        if t_start > 99 + corrector_step and corrector_step > 1:
-            correction_latents = np.linspace(99, np.max(t_valid), corrector_step).astype(int).tolist()
-            epsilon_correction = np.geomspace(1,100,1000)[::-1] 
+
+        if t_start > min_latent_space_update + corrector_step and corrector_step > 1:
+            correction_latents = np.linspace(min_latent_space_update, np.max(t_valid), corrector_step).astype(int).tolist()
+            epsilon_correction = np.geomspace(1,300,1000)[::-1]
+            if use_std_schedule:
+                epsilon_correction = 1 / stds.cpu().numpy()
             epsilon_correction = epsilon_correction / epsilon_correction[np.max(t_valid)]
         else:
+
             correction_latents = [np.max(t_valid)]
         # print(f"correction_latents {correction_latents}")
         with torch.no_grad():
@@ -463,70 +490,53 @@ class Hugginface_Trainer(BaseTrainer):
 
             inputs = inputs.cuda(self.cfg.trainer.gpu)
 
-            edited_to_be_done = True
-            if comparison:
-                run_with_correction = [True,False]
-            else:
-                run_with_correction = [corrector_step]
-            for corrector in run_with_correction:
+            if True:
                 for t in tqdm(t_valid[::-1]):
                     counter = 0
                     if std_div > 0:
-                        if t>100 and t < t_start-1:
-                            while std_recon < (1-std_div) or std_recon > (1+std_div):
-                                inputs,alpha_coef, list_of_stds, list_of_means = self.langevin_sampling(inputs, t, None, steps = steps, epsilon = epsilon,
-                                                    min_variance = min_variance, clip_prev = False, clip_now = False,dynamic_thresholding=self.cfg.trainer.dynamic_thresholding_langevin, power = power)
-            
-                                std_recon = list_of_stds[-1]
-                                counter += 1
-                                if counter > 100:
-                                    epsilon = 2*epsilon
-                                for h in range(len(inputs)):
-                                    list_of_evolution_reverse.append(inputs[h].cpu())
-                            epsilon *= 1
+                        LOG.info(f"STD useage deprecated.")
                             
-                    elif t == np.max(t_valid) and edited_to_be_done:
+                    elif t == np.max(t_valid):
                         before = inputs.cpu()
                         if annealing>1:
                             new_epsilon = epsilon
+                            step_per_epsilon = steps // len(range(int(annealing))) 
                             for j in range(int(annealing)):
-                                step_per_epsilon = steps // len(range(int(annealing)))
-                                inputs,alpha_coef, list_of_stds, list_of_means = self.langevin_sampling(inputs, t, None, steps = step_per_epsilon, epsilon = new_epsilon,
+                                LOG.info(f"Orignal Epsilon : {epsilon}, Update_{j}_epsilon : {new_epsilon}")
+                                inputs, alpha_coef, _, _ = self.langevin_sampling(inputs, t, None, steps = step_per_epsilon, epsilon = new_epsilon,
                                                     min_variance = min_variance, clip_prev = False, clip_now = False,dynamic_thresholding=self.cfg.trainer.dynamic_thresholding_langevin,power = power)
-                                new_epsilon  = new_epsilon * self.cfg.trainer.annealing_cst
+                                new_epsilon  = new_epsilon * annealing_cst
+                                
    
                         else:
-                            inputs,alpha_coef, list_of_stds, list_of_means = self.langevin_sampling(inputs, t, None, steps = steps, epsilon = epsilon,
+                            inputs,alpha_coef, _, _ = self.langevin_sampling(inputs, t, None, steps = steps, epsilon = epsilon,
                                     min_variance = min_variance, clip_prev = False, clip_now = False,dynamic_thresholding=self.cfg.trainer.dynamic_thresholding_langevin, power = power)  
-                        std_recon = list_of_stds[-1]
+                        
                         for h in range(len(inputs)):
                                 list_of_evolution_reverse.append(inputs[h].cpu())
-                        edited_latents = inputs
-                        edited_to_be_done = False
-                    elif t == np.max(t_valid):
-                        inputs = edited_latents
 
                     elif t in correction_latents:
                         before = inputs.cpu()
-                        
                         new_epsilon = epsilon * epsilon_correction[t]
-                        print(f'at {t} epsilon before {epsilon}, epsilon after {new_epsilon}')
+                        LOG.info(f'At latent {t} epsilon becomes {new_epsilon}, epsilon was {epsilon} originally.')
                         if annealing>1:
+                            step_per_epsilon = steps // len(range(int(annealing)))
                             for j in range(int(annealing)):
-                                step_per_epsilon = steps // len(range(int(annealing)))
+                                LOG.info(f"Orignal Epsilon : {epsilon}, Update_{j}_epsilon : {new_epsilon}")
                                 inputs,alpha_coef, list_of_stds, list_of_means = self.langevin_sampling(inputs, t, None, steps = step_per_epsilon, epsilon = new_epsilon,
                                                     min_variance = min_variance, clip_prev = False, clip_now = False,dynamic_thresholding=self.cfg.trainer.dynamic_thresholding_langevin,power = power)
                                 new_epsilon  = new_epsilon * annealing_cst
+                                
                         else:
-                            inputs,alpha_coef, list_of_stds, list_of_means = self.langevin_sampling(inputs, t, None, steps = steps, epsilon = new_epsilon,
+                            inputs,alpha_coef, _, _ = self.langevin_sampling(inputs, t, None, steps = steps, epsilon = new_epsilon,
                                     min_variance = min_variance, clip_prev = False, clip_now = False,dynamic_thresholding=self.cfg.trainer.dynamic_thresholding_langevin, power = power)  
-                        std_recon = list_of_stds[-1]
+                        
                         for h in range(len(inputs)):
                                 list_of_evolution_reverse.append(inputs[h].cpu())
 
-                    inputs, std_epsilon, mean_epsilon = self.ddim_step(inputs, t, sigma = 0.,
+                    inputs, _, _ = self.ddim_step(inputs, t, sigma = 0.,
                                                             clip_denoised=False,dynamic_thresholding=self.cfg.trainer.dynamic_thresholding_ddim, forward=True, number_of_sample = number_of_sample)               
-                    std_recon = std_epsilon
+                    
                     for h in range(len(inputs)):
                         list_of_evolution_reverse.append(inputs[h].cpu())
                 for sample in list_of_evolution_reverse[-batch_size*number_of_sample:]:
@@ -556,34 +566,22 @@ class Hugginface_Trainer(BaseTrainer):
 
     @torch.no_grad()
     def batch_for_single_image_experiments(self, input_image = None, number = 1, number_of_images = 4):
-            # corruptions_list = ["motion_blur", "frost", "speckle_noise", "impulse_noise", "shot_noise", "jpeg_compression",
-                                # "pixelate", "brightness", "fog", "saturate", "gaussian_noise", 'elastic_transform',
-                                # 'snow', 'masking_vline_random_color', 'spatter', 'glass_blur', 'gaussian_blur', 'contrast', 'masking_random_color']
-            # print(self.cfg.trainer.number_of_image)
             corruptions_list = self.corruptions_list
             number_of_images = self.cfg.trainer.number_of_image or number_of_images
-            # print('number_of_images', number_of_images)
             img_list = []
             original_list = []
-            # if number_of_images > 0:
-            #     subset = np.random.choice(corruptions_list, number_of_images, replace=False)
-            # else:
-            #     number_of_images = len(corruptions_list)
             subset = corruptions_list
-            
-            # print(f'subset length {len(subset)}')
             corruptions_order = []
             for corruption in subset:
                 img_tensor, original = self.corrupt(image=input_image, number = number, corruption=corruption)
-                img_list.append(img_tensor.squeeze())
-                original_list.append(original.squeeze())
+                # img_tensor, original = self.corrupt_batch(images=input_image, number = number, corruption=corruption)
+                # print("New",img_tensor.shape, original.shape)
+                img_list.append(img_tensor)
+                original_list.append(original)
                 corruptions_order.append(corruption)
 
-            img_tensor_batch = torch.stack(img_list)
-            original_batch = torch.stack(original_list)
-
-            # The rest of your code to log or save the results goes here...
-            # For example, you can use img_tensor_batch and original_batch as needed.
+            img_tensor_batch = torch.cat(img_list, dim=0)
+            original_batch = torch.cat(original_list, dim=0)
 
             return img_tensor_batch, original_batch, corruptions_order
         
@@ -617,20 +615,23 @@ class Hugginface_Trainer(BaseTrainer):
             self.subset_dataset = Subset(self.test_dataset, list(images_numbers))
         else:
             self.subset_dataset = Subset(self.train_dataset, list(images_numbers))
-        print(f"{self.cfg.trainer.gpu} : {list(images_numbers)[:2]}")
+        # print(f"{self.cfg.trainer.gpu} : {list(images_numbers)[:2]}")
         # print(list(images_numbers))
         LOG.info(f"SubDataset length {len(self.subset_dataset)} ")
         print("sync_key", self.cfg.trainer.sync_key)
-        directory_base = f"{self.root}/ODEDIT/qualitative"
-        directory_latent = f"{self.root}/ODEDIT/qualitative/latent"
-        os.makedirs(directory_latent, exist_ok=True)
+        if self.cfg.trainer.lsun_category is not None and self.cfg.trainer.dataset == 'LSUN':
+            directory_base = f"{self.root}/ODEDIT/qualitative/{self.cfg.trainer.dataset}_{self.cfg.trainer.lsun_category}/{self.cfg.trainer.exp_name_folder}"
+        else:
+            directory_base = f"{self.root}/ODEDIT/qualitative/{self.cfg.trainer.dataset}/{self.cfg.trainer.exp_name_folder}"
+        # directory_latent = f"{self.root}/ODEDIT/qualitative/latent"
+        # os.makedirs(directory_latent, exist_ok=True)
         os.makedirs(directory_base, exist_ok=True)
 
         self.dataloader = create_dataloader(self.subset_dataset,
                                         rank=self.cfg.trainer.rank,
                                         max_workers=self.cfg.trainer.num_workers,
                                         world_size=self.cfg.trainer.world_size,
-                                        batch_size=1,
+                                        batch_size=self.cfg.trainer.batch_size,
                                         shuffle=False,
                                         single_gpu = self.cfg.trainer.single_gpu
                                         )
@@ -638,6 +639,7 @@ class Hugginface_Trainer(BaseTrainer):
         
         # for rcp in case of crash
         if os.path.exists(f"{directory_base}/checkpoint_state.p"):
+            LOG.info('checkpoint_state.p found.')
             ckpt_dict = pickle.load(open(f"{directory_base}/checkpoint_state.p","rb"))
             current_index = ckpt_dict['index']
             current_epsilon = ckpt_dict['epsilon']
@@ -655,6 +657,8 @@ class Hugginface_Trainer(BaseTrainer):
         LOG.info(f"Starting Dataloader loop.")
         for k, (_, img_batch, indexes) in enumerate(self.dataloader):
             if k >= current_index:
+                if self.cfg.trainer.gpu == 0:
+                    print(indexes)
                 current_index = k
                 torch.cuda.empty_cache()
                 index_list = indexes.tolist()
@@ -668,13 +672,16 @@ class Hugginface_Trainer(BaseTrainer):
                 original = original.cuda(self.cfg.trainer.gpu)
                 index_directory = []
                 for i,corr in enumerate(corruptions_order):
-                    counter = 0
-                    while os.path.isdir(f"{directory_base}/{corruptions_order[i]}/{index_list[0]}_{counter}"):
-                        counter +=1
-                    index_directory.append(f"{directory_base}/{corruptions_order[i]}/{index_list[0]}_{counter}")
-                    os.makedirs(f"{directory_base}/{corruptions_order[i]}/{index_list[0]}_{counter}", exist_ok=True)
-                    os.makedirs(f"{directory_base}/{corruptions_order[i]}/{index_list[0]}_{counter}/sde", exist_ok=True)
-                    os.makedirs(f"{directory_base}/{corruptions_order[i]}/{index_list[0]}_{counter}/ode", exist_ok=True)
+                    for index in index_list:
+                        counter = 0
+                        while os.path.isdir(f"{directory_base}/{corruptions_order[i]}/{index}_{counter}"):
+                            counter +=1
+                        # print(f"{directory_base}/{corruptions_order[i]}/{index}_{counter}")
+                        index_directory.append(f"{directory_base}/{corruptions_order[i]}/{index}_{counter}")
+                        os.makedirs(f"{directory_base}/{corruptions_order[i]}/{index}_{counter}", exist_ok=True)
+                        os.makedirs(f"{directory_base}/{corruptions_order[i]}/{index}_{counter}/sde", exist_ok=True)
+                        os.makedirs(f"{directory_base}/{corruptions_order[i]}/{index}_{counter}/ode", exist_ok=True)
+
                 for i,image in enumerate(img_tensor):
                     save_image(img_tensor[i].cpu()/2+0.5,f"{index_directory[i]}/corrupted_{self.cfg.trainer.gpu}.png")
                     save_image(original[i].cpu()/2+0.5,f"{index_directory[i]}/original_{self.cfg.trainer.gpu}.png") 
@@ -685,7 +692,8 @@ class Hugginface_Trainer(BaseTrainer):
                     img_grid_original= wandb.Image(grid_original.permute(1,2,0).numpy())
                     wandb.log({f"Corruption_{[corr[:5] for corr in corruptions_order]}": img_grid_corrupted},commit=True)
                     wandb.log({f"Original": img_grid_original},commit=True)
-            
+
+
                 if self.cfg.trainer.run_sdedit and run_sdedit:
                     for latent in range(sde_range[0],sde_range[1], sde_range[2]):
                         sample_step = 1
@@ -694,7 +702,7 @@ class Hugginface_Trainer(BaseTrainer):
                         samples = torch.stack(results_normalized.split(number_of_sample, dim=0))
                         for k, corruption_samples in enumerate(samples):
                             for sample_index, sample in enumerate(corruption_samples):
-                                save_image(sample.cpu(), f"{index_directory[k]}/sde/{latent}_{sample_index}_{self.cfg.trainer.gpu}.png")
+                                save_image(sample.cpu(), f"{index_directory[k]}/sde/{latent}_{self.cfg.trainer.gpu}_{sample_index}.png")
                         if self.cfg.trainer.gpu == 0:
                             grid_reco_sde = make_grid(results_normalized.cpu().detach())
                             img_grid_reco_sde = wandb.Image(grid_reco_sde.permute(1,2,0).numpy())
@@ -720,22 +728,24 @@ class Hugginface_Trainer(BaseTrainer):
                             if l >= current_epsilon or self.cfg.trainer.run_all_epsilon:
                                 current_epsilon = l
                                 list_of_evolution_reverse, samples = self.editing_with_ode(latent_codes, self.ddpm.unet, t_start = latent, 
-                                            std_div = -1, epsilon = epsilon, steps = number_of_steps, power =0.5, 
-                                            number_of_sample = number_of_sample,
-                                            corrector_step = self.cfg.trainer.number_of_latents_corrected,
-                                            deep_correction=False, comparison = False)
+                                            std_div = -1, epsilon = epsilon, steps = number_of_steps, power =0.5, min_latent_space_update = self.cfg.trainer.min_latent_space_update,
+                                            number_of_sample = number_of_sample, annealing = self.cfg.trainer.annealing, annealing_cst=self.cfg.trainer.annealing_cst,
+                                            corrector_step = self.cfg.trainer.number_of_latents_corrected,use_std_schedule=self.cfg.trainer.use_std_schedule
+                                            )
                                 samples_stacked = torch.stack(samples)
 
                                 samples = torch.stack(samples_stacked.split(number_of_sample, dim=0)) / 2 + 0.5
                                 for k, corruption_samples in enumerate(samples):
                                     for sample_index, sample in enumerate(corruption_samples):
-                                        save_image(sample.cpu(), f"{index_directory[k]}/ode/{sample_index}_{number_of_steps}_{round(epsilon,6)}_{self.cfg.trainer.gpu}.png")
+                                        save_image(sample.cpu(), f"{index_directory[k]}/ode/{number_of_steps}_{round(epsilon,6)}_{self.cfg.trainer.gpu}_{sample_index}.png")
                                 if self.cfg.trainer.gpu == 0:
                                     grid_reco = make_grid(samples_stacked.cpu().detach())
                                     img_grid_reco= wandb.Image(grid_reco.permute(1,2,0).numpy())
                                     wandb.log({f"Reconstruction_l{latent}_e{round(epsilon,6)}": img_grid_reco},commit=True)
                             ckpt_dict = {'index':current_index, 'epsilon':current_epsilon, 'run_sdedit':run_sdedit}
                             pickle.dump(ckpt_dict,open(f"{directory_base}/checkpoint_state.p",'wb'))
+
+                run_sdedit = True
                             
         return
 
@@ -787,7 +797,7 @@ class Hugginface_Trainer(BaseTrainer):
                                         
         dictionnary_corruption_epsilon = {}
 
-        epsilons = np.geomspace(self.cfg.trainer.min_epsilon,self.cfg.trainer.max_epsilon, self.cfg.trainer.number_of_epsilons)
+        epsilons = np.linspace(self.cfg.trainer.min_epsilon,self.cfg.trainer.max_epsilon, self.cfg.trainer.number_of_epsilons)
 
         list_steps = [self.cfg.trainer.number_of_steps]
         ### IF different per latent
@@ -853,11 +863,10 @@ class Hugginface_Trainer(BaseTrainer):
                         for epsilon in epsilons:
                             for _, image_index in enumerate(index_list):
                                 os.makedirs(f"{directory_reconstruction_ode_latent_corruption}/{image_index}/{number_of_steps}_{round(epsilon,6)}", exist_ok = True)
-                            list_of_evolution_reverse, samples = self.editing_with_ode(latent_codes, self.ddpm.unet, t_start = latent, 
+                            list_of_evolution_reverse, samples = self.editing_with_ode(latent_codes, self.ddpm.unet, t_start = latent, min_latent_space_update =self.cfg.trainer.min_latent_space_update,
                                         std_div = -1, epsilon = epsilon, steps = number_of_steps, power =0.5, 
-                                        number_of_sample = number_of_sample,
-                                        corrector_step = False,
-                                        deep_correction=False, comparison = False)
+                                        number_of_sample = number_of_sample, annealing = self.cfg.trainer.annealing, annealing_cst=self.cfg.trainer.annealing_cst,
+                                        corrector_step = False, use_std_schedule = self.cfg.trainer.use_std_schedule)
                             samples_stacked = torch.stack(samples)
                             if self.cfg.trainer.batch_size > 1:
                                 samples = torch.stack(samples_stacked.split(number_of_sample, dim=0)) 
