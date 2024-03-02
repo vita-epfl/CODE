@@ -19,7 +19,7 @@ dataset: CELEBAHQ #help='dataset name')
 exp_name_folder: RCP_1
 lsun_category: None # one of ["bedroom","bridge","church_outdoor","classroom","conference_room","dining_room","kitchen","living_room","restaurant","tower",
 corruptions_list: ['fog', 'contrast', 'spatter',"frost","speckle_noise","elastic_transform",'impulse_noise', "shot_noise", "gaussian_noise",
-                  'masking_vline_random_color','masking_random_color',"snow","brightness", "glass_blur", "motion_blur", "gaussian_blur", "pixelate"] 
+                  'masking_vline_random_color','masking_random_color',"brightness", "glass_blur", "gaussian_blur", "pixelate", "jpeg_compression", 'saturate'] 
                   #["frost", "speckle_noise",'impulse_noise', "shot_noise", "gaussian_noise","jpeg_compression","pixelate",
                   #"fog","gaussian_blur","elastic_transform", "motion_blur","glass_blur","brightness", "saturate",
                   #'snow', 'masking_vline_random_color', 'spatter', 'contrast', 'masking_random_color']
