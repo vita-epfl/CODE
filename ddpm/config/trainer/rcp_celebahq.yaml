@@ -28,7 +28,7 @@ use_val: false
 num_workers: 4 #help='workers of Dataloader')
 corruption:  #help=corruption type base on Imagenet-C
 corruption_severity:  #help='corruption severity level 1-5'
-random_flip: True #help='Whether to use random flip in training')
+random_flip: False #help='Whether to use random flip in training')
 # lower_image_size: 
 # original_img_size: []
 img_size: 256 #help='image size')
