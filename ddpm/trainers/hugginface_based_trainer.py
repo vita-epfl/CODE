@@ -677,8 +677,7 @@ class Hugginface_Trainer(BaseTrainer):
                     os.makedirs(f"{directory_base}/{corruptions_order[i]}/{index_list[0]}_{counter}/ode", exist_ok=True)
                 for i,image in enumerate(img_tensor):
                     save_image(img_tensor[i].cpu()/2+0.5,f"{index_directory[i]}/corrupted_{self.cfg.trainer.gpu}.png")
-                    if i == 0:
-                        save_image(original[i].cpu()/2+0.5,f"{index_directory[i]}/original_{self.cfg.trainer.gpu}.png") 
+                    save_image(original[i].cpu()/2+0.5,f"{index_directory[i]}/original_{self.cfg.trainer.gpu}.png") 
                 if self.cfg.trainer.gpu == 0:
                     grid_corrupted = make_grid(img_tensor.cpu().detach())
                     grid_original = make_grid(original.cpu().detach())
