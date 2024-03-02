@@ -90,8 +90,9 @@ def get_dataset(args, cfg):
                 split="train",
                 corruption=corruption,
                 corruption_severity=corruption_severity,
-                transform=transforms.Compose(transforms.ToTensor(),
-                        [transforms.Resize(image_size),
+                transform=transforms.Compose(
+                        [transforms.ToTensor(),
+                        transforms.Resize(image_size),
                         transforms.CenterCrop([cfg.trainer.img_size,cfg.trainer.img_size]), 
                         transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]
                             )
