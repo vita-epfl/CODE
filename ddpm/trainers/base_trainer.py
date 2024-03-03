@@ -19,6 +19,7 @@ import submitit
 from tqdm import tqdm
 import time
 import datetime
+import numpy as np
 
 from torch.utils.tensorboard import SummaryWriter
 
@@ -144,7 +145,13 @@ class BaseTrainer(object):
         pass
 
     def setup_platform(self) -> None:
-        fix_random_seeds(self.cfg.trainer.seed)
+        if self.cfg.trainer.random_seed:
+            seed = np.random.randint(10000)
+            fix_random_seeds(seed)
+            with open_dict(self.cfg):
+                self.cfg.trainer.seed = seed
+        else:
+            fix_random_seeds(self.cfg.trainer.seed)
         if self.cfg.trainer.platform == "local":
             LOG.info(f"Training platform : {self.cfg.trainer.platform}")
             if self.cfg.trainer.single_gpu:
