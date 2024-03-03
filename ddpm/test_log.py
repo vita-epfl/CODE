@@ -1,6 +1,8 @@
 import logging
 import hydra
 import submitit
+import os
+import time.sleep()
 
 from omegaconf import DictConfig, open_dict
 from torch.distributed.elastic.multiprocessing.errors import record
@@ -29,13 +31,16 @@ def main(cfg: DictConfig) -> int:
 
     with open_dict(cfg):
         cfg.trainer.logdir = str(get_output_dir(cfg, cfg.trainer.sync_key))
-
     if cfg.trainer.platform == "local":
         LOG.info(f"Output directory {cfg.trainer.logdir}/{cfg.trainer.sync_key}")
         trainer.setup_platform()
         trainer.setup_trainer()
         if cfg.trainer.qualitative_experiment:
-            trainer.run_qualitative_experiments()
+            try:
+                trainer.run_qualitative_experiments()
+            except Exception as e:
+                LOG.error(f"Stopped with the following error : {e}")
+                time.sleep(2)
         else:
             trainer.run_experiments()
         return 0
