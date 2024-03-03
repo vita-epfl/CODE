@@ -598,9 +598,9 @@ class Hugginface_Trainer(BaseTrainer):
             LOG.info(f"SubDataset length {len(self.subset_dataset)} ")
             print("sync_key", self.cfg.trainer.sync_key)
             if self.cfg.trainer.lsun_category is not None and self.cfg.trainer.dataset == 'LSUN':
-                directory_base = f"{self.root}/ODEDIT/qualitative/{self.cfg.trainer.dataset}_{self.cfg.trainer.lsun_category}/{self.cfg.trainer.exp_name_folder}"
+                directory_base = f"{self.root}/ODEDIT/{self.cfg.trainer.dataset}_{self.cfg.trainer.lsun_category}/{self.cfg.trainer.exp_name_folder}/{self.cfg.trainer.sync_key}"
             else:
-                directory_base = f"{self.root}/ODEDIT/qualitative/{self.cfg.trainer.dataset}/{self.cfg.trainer.exp_name_folder}"
+                directory_base = f"{self.root}/ODEDIT/{self.cfg.trainer.dataset}/{self.cfg.trainer.exp_name_folder}/{self.cfg.trainer.sync_key}"
             # directory_latent = f"{self.root}/ODEDIT/qualitative/latent"
             # os.makedirs(directory_latent, exist_ok=True)
             os.makedirs(directory_base, exist_ok=True)
@@ -653,18 +653,18 @@ class Hugginface_Trainer(BaseTrainer):
                     index_directory = []
                     for i,corr in enumerate(corruptions_order):
                         for index in index_list:
-                            counter = 0
-                            while os.path.isdir(f"{directory_base}/{corruptions_order[i]}/{index}_{counter}"):
-                                counter +=1
+                            # counter = 0
+                            # while os.path.isdir(f"{directory_base}/{corruptions_order[i]}/{index}_{counter}"):
+                            #     counter +=1
                             # print(f"{directory_base}/{corruptions_order[i]}/{index}_{counter}")
-                            index_directory.append(f"{directory_base}/{corruptions_order[i]}/{index}_{counter}")
-                            os.makedirs(f"{directory_base}/{corruptions_order[i]}/{index}_{counter}", exist_ok=True)
-                            os.makedirs(f"{directory_base}/{corruptions_order[i]}/{index}_{counter}/sde", exist_ok=True)
-                            os.makedirs(f"{directory_base}/{corruptions_order[i]}/{index}_{counter}/ode", exist_ok=True)
+                            index_directory.append(f"{directory_base}/{corruptions_order[i]}/{index}")
+                            os.makedirs(f"{directory_base}/{corruptions_order[i]}/{index}", exist_ok=True)
+                            os.makedirs(f"{directory_base}/{corruptions_order[i]}/{index}/sde", exist_ok=True)
+                            os.makedirs(f"{directory_base}/{corruptions_order[i]}/{index}/ode", exist_ok=True)
 
                     for i,image in enumerate(img_tensor):
-                        save_image(img_tensor[i].cpu()/2+0.5,f"{index_directory[i]}/corrupted_{self.cfg.trainer.gpu}.png")
-                        save_image(original[i].cpu()/2+0.5,f"{index_directory[i]}/original_{self.cfg.trainer.gpu}.png") 
+                        save_image(img_tensor[i].cpu()/2+0.5,f"{index_directory[i]}/corrupted.png")
+                        save_image(original[i].cpu()/2+0.5,f"{index_directory[i]}/original.png") 
                     if self.cfg.trainer.gpu == 0:
                         grid_corrupted = make_grid(img_tensor.cpu().detach())
                         grid_original = make_grid(original.cpu().detach())
@@ -682,7 +682,7 @@ class Hugginface_Trainer(BaseTrainer):
                             samples = torch.stack(results_normalized.split(number_of_sample, dim=0))
                             for k, corruption_samples in enumerate(samples):
                                 for sample_index, sample in enumerate(corruption_samples):
-                                    save_image(sample.cpu(), f"{index_directory[k]}/sde/{latent}_{self.cfg.trainer.gpu}_{sample_index}.png")
+                                    save_image(sample.cpu(), f"{index_directory[k]}/sde/{latent}_{sample_index}.png")
                             if self.cfg.trainer.gpu == 0:
                                 grid_reco_sde = make_grid(results_normalized.cpu().detach())
                                 img_grid_reco_sde = wandb.Image(grid_reco_sde.permute(1,2,0).numpy())
@@ -718,7 +718,7 @@ class Hugginface_Trainer(BaseTrainer):
                                     samples = torch.stack(samples_stacked.split(number_of_sample, dim=0)) / 2 + 0.5
                                     for k, corruption_samples in enumerate(samples):
                                         for sample_index, sample in enumerate(corruption_samples):
-                                            save_image(sample.cpu(), f"{index_directory[k]}/ode/{number_of_steps}_{round(epsilon,6)}_{self.cfg.trainer.gpu}_{sample_index}.png")
+                                            save_image(sample.cpu(), f"{index_directory[k]}/ode/{number_of_steps}_{round(epsilon,9)}_{sample_index}.png")
                                     if self.cfg.trainer.gpu == 0:
                                         grid_reco = make_grid(samples_stacked.cpu().detach())
                                         img_grid_reco= wandb.Image(grid_reco.permute(1,2,0).numpy())

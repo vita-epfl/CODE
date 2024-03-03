@@ -2,6 +2,7 @@ name: base_trainer
 type: base
 platform: local
 
+random_seed: false
 seed: 0
 training_perc: 0.8
 validation_perc: 0  # train + validation + test == 1
