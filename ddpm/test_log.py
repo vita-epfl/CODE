@@ -2,7 +2,7 @@ import logging
 import hydra
 import submitit
 import os
-import time.sleep()
+import time
 
 from omegaconf import DictConfig, open_dict
 from torch.distributed.elastic.multiprocessing.errors import record
