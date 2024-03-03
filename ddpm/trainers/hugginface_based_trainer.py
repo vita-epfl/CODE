@@ -631,7 +631,7 @@ class Hugginface_Trainer(BaseTrainer):
                 ckpt_dict = {'index':current_index, 'epsilon':current_epsilon, 'run_sdedit':run_sdedit}
                 pickle.dump(ckpt_dict,open(f"{directory_base}/checkpoint_state.p",'wb'))
 
-            epsilons = np.linspace(self.cfg.trainer.min_epsilon,self.cfg.trainer.max_epsilon, self.cfg.trainer.number_of_epsilons)
+            epsilons = np.geomspace(self.cfg.trainer.min_epsilon,self.cfg.trainer.max_epsilon, self.cfg.trainer.number_of_epsilons)
             list_steps = [self.cfg.trainer.number_of_steps]
 
             LOG.info(f"Starting Dataloader loop.")
