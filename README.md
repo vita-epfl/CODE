@@ -1,18 +1,12 @@
-# Denoising Diffusion Probabilistic Models
+# ODEdit: Towards Robust Guided Image Generation
 
-Unofficial PyTorch implementation of Denoising Diffusion Probabilistic Models [1].
+Official PyTorch implementation of ODEdit: Towards Robust Guided Image Generation.
 
-This implementation follows the most of details in official TensorFlow
-implementation [2]. I use PyTorch coding style to port [2] to PyTorch and hope
-that anyone who is familiar with PyTorch can easily understand every
-implementation details.
+The provided notebook is self-contained, including the installation of all the packages required and the ODEdit algorithm itself.
 
 
 ## Requirements
-- Python 3.8
-
-## Reference
-
-[1] [Denoising Diffusion Probabilistic Models](https://arxiv.org/abs/2006.11239)
-
-[2] [Official TensorFlow implementation](https://github.com/hojonathanho/diffusion)
+- Python > 3.8
+- PyTorch > 2
+- Diffusers == 0.27
+- Accelerate == 0.28
