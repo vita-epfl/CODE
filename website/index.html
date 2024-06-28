@@ -1,0 +1,743 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <meta charset="utf-8">
+  <meta name="description" content="Visual Instruction Tuning">
+  <meta name="keywords" content="multimodal chatbot">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CODE</title>
+
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Google+Sans|Noto+Sans|Castoro">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@0.9.1/css/bulma.min.css">
+  <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/jpswalsh/academicons@1/css/academicons.min.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.1/css/all.min.css">
+  <link rel="stylesheet" href="./static/css/index.css">
+  <link rel="icon" href="https://cdn-icons-png.flaticon.com/512/4229/4229137.png">
+  <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+  <link rel="stylesheet" href="./static/css/bulma.min.css">
+  <link rel="stylesheet" href="./static/css/bulma-carousel.min.css">
+  <link rel="stylesheet" href="./static/css/bulma-slider.min.css">
+  
+  
+  <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+  <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
+  <script defer src="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.1/js/all.min.js"></script>
+  <script src="./static/js/bulma-carousel.min.js"></script>
+  <script src="./static/js/bulma-slider.min.js"></script>
+  <script src="./static/js/index.js"></script>
+  <!-- <script type="module" src="https://gradio.s3-us-west-2.amazonaws.com/4.16.0/gradio.js"></script> -->
+</head>
+
+<style>
+  .expandable-card .card-text-container {
+    max-height: 200px;
+    overflow-y: hidden;
+    position: relative;
+  }
+
+  .expandable-card.expanded .card-text-container {
+    max-height: none;
+  }
+
+  .expand-btn {
+    position: relative;
+    display: none;
+    background-color: rgba(255, 255, 255, 0.8);
+    /* margin-top: -20px; */
+    /* justify-content: center; */
+    color: #510c75;
+    border-color: transparent;
+  }
+
+  .expand-btn:hover {
+    background-color: rgba(200, 200, 200, 0.8);
+    text-decoration: none;
+    border-color: transparent;
+    color: #510c75;
+  }
+
+  .expand-btn:focus {
+    outline: none;
+    text-decoration: none;
+  }
+
+  .expandable-card:not(.expanded) .card-text-container:after {
+    content: "";
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    height: 90px;
+    background: linear-gradient(rgba(255, 255, 255, 0.2), rgba(255, 255, 255, 1));
+  }
+
+  .expandable-card:not(.expanded) .expand-btn {
+    margin-top: -40px;
+  }
+
+  .card-body {
+    padding-bottom: 5px;
+  }
+
+  .vertical-flex-layout {
+    justify-content: center;
+    align-items: center;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+
+  .figure-img {
+    max-width: 100%;
+    height: auto;
+  }
+
+  .adjustable-font-size {
+    font-size: calc(0.5rem + 2vw);
+  }
+
+  .chat-history {
+    flex-grow: 1;
+    overflow-y: auto;
+    /* overflow-x: hidden; */
+    padding: 5px;
+    border-bottom: 1px solid #ccc;
+    margin-bottom: 10px;
+  }
+
+  #gradio pre {
+    background-color: transparent;
+  }
+
+  .slider-pagination {
+    visibility: hidden;
+  }
+</style>
+
+<body>
+
+
+  <section class="hero">
+    <div class="hero-body">
+      <div class="container is-max-desktop">
+        <div class="columns is-centered">
+          <div class="column has-text-centered">
+            <h1 class="title is-1 publication-title">CODE: <span class="is-size-2"><span class="is-size-1">C</span>onfident <span class="is-size-1">O</span>rdinary <span class="is-size-1">D</span>ifferential <span class="is-size-1">E</span>diting</h1>
+            <!-- <h3 class="title is-3 publication-title">Visual Instruction Tuning</h3> -->
+            <!-- <h5 class="subtitle is-5 publication-awards">NeurIPS 2023 (Oral)</h5> -->
+            <div class="is-size-5 publication-authors">
+              <span class="author-block">
+                <a href="https://www.linkedin.com/in/bastien-van-delft-1b2a7012a" style="color:#008AD7;font-weight:normal;">Bastien van Delft</a>,
+              </span>
+              <span class="author-block">
+                <a href="https://tommymarto.github.io/" style="color:#008AD7;font-weight:normal;">Tommaso Martorella</a>,
+              </span>
+              <span class="author-block">
+                <a href="https://people.epfl.ch/alexandre.alahi?lang=en" style="color:#008AD7;font-weight:normal;">Alexandre Alahi</a>
+              </span>
+            </div>
+
+            <div class="is-size-5 publication-authors">
+              <span class="author-block"><b style="color:#008AD7; font-weight:normal">&#x25B6 </b> EPFL</b></span>
+            </div>
+
+            <div class="column has-text-centered">
+              <div class="publication-links">
+                <span class="link-block">
+                  <a href="https://arxiv.org/abs/..." target="_blank"
+                    class="external-link button is-normal is-rounded is-dark">
+                    <span class="icon">
+                      <i class="ai ai-arxiv"></i>
+                    </span>
+                    <span>arXiv</span>
+                  </a>
+                </span>
+                <span class="link-block">
+                  <a href="https://github.com/vita-epfl/CODE" target="_blank"
+                    class="external-link button is-normal is-rounded is-dark">
+                    <span class="icon">
+                      <i class="fab fa-github"></i>
+                    </span>
+                    <span>Code</span>
+                  </a>
+                </span>
+                <span class="link-block">
+                  <a href="https://colab.research.google.com/github/vita-epfl/CODE/blob/main/ODEdit.ipynb" target="_blank"
+                    class="external-link button is-normal is-rounded is-dark">
+                    <span class="icon">
+                      <i class="far fa-images"></i>
+                    </span>
+                    <span>Demo</span>
+                  </a>
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="hero teaser">
+    <div class="container is-max-desktop">
+      <div class="hero-body">
+        <h4 class="subtitle has-text-centered">
+          CODE is a novel approach for image editing that handles noisy or out-of-distribution image guidance effectively. Utilizing a diffusion model generative prior, CODE enhances images through score-based updates along the probability-flow ODE trajectory, without needing task-specific training or handcrafted modules, and operating in a fully blind manner. A confidence interval-based clipping technique further enhances blind restoration. Experimental results demonstrate CODE's effectiveness, particularly with severely degraded or out-of-distribution inputs.
+        </h4>
+      </div>
+      <div class="hero-body">
+        <img src="images/main_figure.png" alt="LLaVA" style="width: 49%; height: auto; display: inline-block;">
+        <img src="images/main_figure.png" alt="LLaVA" style="width: 49%; height: auto; display: inline-block">
+      </div>
+    </div>
+  </section>
+
+  <!-- <section class="section"  style="background-color:#efeff081">
+    <div class="container is-max-desktop" id="gradio">
+      <gradio-app src="https://llava.hliu.cc"></gradio-app>
+    </div>
+  </section> -->
+
+  <section class="section"  style="background-color:#efeff081">
+    <div class="container is-max-desktop">
+      <!-- Abstract. -->
+      <div class="columns is-centered has-text-centered">
+        <div class="column is-six-fifths">
+          <h2 class="title is-3">Abstract</h2>
+          <div class="content has-text-justified">
+            <p>
+              Conditioning image generation on an input image facilitates seamless editing and the creation of photorealistic images. However, conditioning on noisy or Out-of-Distribution (OoD) images poses significant challenges, particularly in balancing fidelity to the input and realism of the output.
+              We introduce Confident Ordinary Differential Editing (CODE), a novel approach for image synthesis that effectively handles OoD guidance images. Utilizing a diffusion model generative prior, CODE enhances images through score-based updates along the probability-flow Ordinary Differential Equation (ODE) trajectory. This method requires no task-specific training, handcrafted modules, or assumptions, and is compatible with any diffusion model.
+              Positioned at the intersection of conditional image generation and blind image restoration, CODE operates in a fully blind manner, relying solely on a pre-trained generative model. Our method introduces an alternative approach to blind restoration: instead of targeting a specific ground truth image based on assumptions about the underlying corruption, CODE aims to increase the likelihood of the input image while maintaining fidelity. This results in the most probable in-distribution image around the input.
+              Our contributions are twofold. First, CODE introduces a novel editing method based on ODE providing enhanced control, realism, and fidelity compared to SDE-based counterpart. Second, we introduce a confidence interval-based clipping method, which improves CODE's effectiveness by allowing it to disregard certain pixels or information, thus enhancing the restoration process in a blind manner. 
+              Experimental results demonstrate CODE's effectiveness over existing methods, particularly in scenarios involving severe degradation or OoD inputs.
+           </p>
+           
+          </div>
+        </div>
+      </div>
+      
+    </div>
+  </section>
+  
+  
+  
+  <section class="section">
+    <!-- Results. -->
+    <div class="columns is-centered has-text-centered">
+      <div class="column is-six-fifths">
+      <centering>
+        <div style="text-align: center;">
+          <img id="arch" width="60%" src="images/code_method.png" style="display: inline; padding-bottom: 10pt;">
+        </div>
+      </centering>
+      <div style="text-align: center; display: inline-block">
+        <p style="padding-bottom: 50pt; width: 60%; margin: auto"><b>Method Figure:</b> Editing corrupted images with CODE. The blue dots illustrates the editing process. The green contour plot represents the distribution of images. Given a corrupted image, we encode it into a latent space using the probability-flow ODE. We use Langevin Dynamics in the latent space to correct the encoded image. Finally, we project the updated latent back into the visual domain.</p>
+      </div>
+      <h2 class="title is-3"><img id="painting_icon" width="3%" src="https://cdn-icons-png.flaticon.com/512/8152/8152650.png"> Ordinary Differential Editing</h2>
+    </div>
+  </div>
+  <!-- </div> -->
+  <!--/ Results. -->    
+<div class="container is-max-desktop">
+
+  <div class="columns is-centered">
+    <div class="column is-full-width">
+      <div class="content has-text-justified">  
+        <p>
+          $$x = 13$$ thsi is math mode.
+        </p>
+      </div>
+    </div>
+  </div>
+
+
+</section>
+ 
+
+<section class="section">
+  <!-- Results. -->
+  <div class="columns is-centered has-text-centered">
+    <div class="column is-six-fifths">
+      <h2 class="title is-3"><img id="painting_icon" width="3%" src="https://cdn-icons-png.flaticon.com/512/2041/2041850.png"> Confidence-Based Clipping</h2>
+    </div>
+  </div>
+  <!-- </div> -->
+  <!--/ Results. -->    
+<div class="container is-max-desktop">
+
+  <div class="columns is-centered">
+    <div class="column is-full-width">
+      <div class="content has-text-justified"> 
+        <p>
+          Some other text
+        </p>
+      </div>
+    </div>
+  </div>
+
+
+</section>
+  
+
+
+<section class="section">
+  <!-- Results. -->
+  <div class="columns is-centered has-text-centered">
+    <div class="column is-six-fifths">
+      <h2 class="title is-3"><img id="painting_icon" width="3%" src="https://cdn-icons-png.flaticon.com/512/3515/3515174.png"> Performance</h2>
+    </div>
+  </div>
+
+
+
+  <!-- </div> -->
+  <!--/ Results. -->    
+<div class="container is-max-desktop">
+
+
+  <!-- Grounedtext2img. -->
+  <div class="columns is-centered">
+    <div class="column is-full-width">
+      
+      <div>
+        div
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<style>
+.carousel-card-column {
+  width: calc(100% / 3);
+  display: inline-block;
+  padding: 0;
+}
+</style>
+
+<section class="section">
+  <div class="columns is-centered has-text-centered">
+    <div class="column is-six-fifths">
+      <h2 class="title is-3"><img id="painting_icon" width="3%" src="https://cdn-icons-png.flaticon.com/512/10301/10301472.png">  Examples on 49 Corruptions</h2>
+    </div>
+  </div>
+    <div class="container">
+      <div id="results-carousel" class="carousel results-carousel">
+        <!-- Caustic Noise -->
+        <div class="item">
+          <div class="grid-container">
+            <!-- Title -->
+            <div class="mt-1 mb-1 has-text-centered has-text-weight-bold is-size-5" style="width: 100%; display: block;">
+              Caustic Noise
+            </div>
+            <!-- Column 1 -->
+            <div class="column carousel-card-column">
+              <img src="images/supp-imgs/caustic_noise/1/original.png">
+              <img src="images/supp-imgs/caustic_noise/2/original.png">
+              <img src="images/supp-imgs/caustic_noise/3/original.png">
+              <img src="images/supp-imgs/caustic_noise/4/original.png">
+              <div class="label mt-1 mb-1 has-text-centered has-text-weight-normal is-size-7">Source</div>
+            </div>
+            
+            <!-- Column 2 -->
+            <div class="column carousel-card-column">
+              <img src="images/supp-imgs/caustic_noise/1/corrupted.png">
+              <img src="images/supp-imgs/caustic_noise/2/corrupted.png">
+              <img src="images/supp-imgs/caustic_noise/3/corrupted.png">
+              <img src="images/supp-imgs/caustic_noise/4/corrupted.png">
+              <div class="label mt-1 mb-1 has-text-centered has-text-weight-normal is-size-7">Input</div>
+            </div>
+            
+            <!-- Column 3 -->
+            <div class="column carousel-card-column">
+              <img src="images/supp-imgs/caustic_noise/1/clipped.png">
+              <img src="images/supp-imgs/caustic_noise/2/clipped.png">
+              <img src="images/supp-imgs/caustic_noise/3/clipped.png">
+              <img src="images/supp-imgs/caustic_noise/4/clipped.png">
+              <div class="label mt-1 mb-1 has-text-centered has-text-weight-normal is-size-7">CODE</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Caustic Refraction Noise -->
+        <div class="item">
+          <div class="grid-container">
+            <!-- Title -->
+            <div class="mt-1 mb-1 has-text-centered has-text-weight-bold is-size-5" style="width: 100%; display: block;">
+              Caustic Refraction
+            </div>
+            <!-- Column 1 -->
+            <div class="column carousel-card-column">
+              <img src="images/supp-imgs/caustic_refraction/1/original.png">
+              <img src="images/supp-imgs/caustic_refraction/2/original.png">
+              <img src="images/supp-imgs/caustic_refraction/3/original.png">
+              <img src="images/supp-imgs/caustic_refraction/4/original.png">
+              <div class="label mt-1 mb-1 has-text-centered has-text-weight-normal is-size-7">Source</div>
+            </div>
+            
+            <!-- Column 2 -->
+            <div class="column carousel-card-column">
+              <img src="images/supp-imgs/caustic_refraction/1/corrupted.png">
+              <img src="images/supp-imgs/caustic_refraction/2/corrupted.png">
+              <img src="images/supp-imgs/caustic_refraction/3/corrupted.png">
+              <img src="images/supp-imgs/caustic_refraction/4/corrupted.png">
+              <div class="label mt-1 mb-1 has-text-centered has-text-weight-normal is-size-7">Input</div>
+            </div>
+            
+            <!-- Column 3 -->
+            <div class="column carousel-card-column">
+              <img src="images/supp-imgs/caustic_refraction/1/clipped.png">
+              <img src="images/supp-imgs/caustic_refraction/2/clipped.png">
+              <img src="images/supp-imgs/caustic_refraction/3/clipped.png">
+              <img src="images/supp-imgs/caustic_refraction/4/clipped.png">
+              <div class="label mt-1 mb-1 has-text-centered has-text-weight-normal is-size-7">CODE</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Brownish Noise -->
+        <div class="item">
+          <div class="grid-container">
+            <!-- Title -->
+            <div class="mt-1 mb-1 has-text-centered has-text-weight-bold is-size-5" style="width: 100%; display: block;">
+              Brownish Noise
+            </div>
+            <!-- Column 1 -->
+            <div class="column carousel-card-column">
+              <img src="images/supp-imgs/brownish_noise/2/original.png">
+              <img src="images/supp-imgs/brownish_noise/4/original.png">
+              <img src="images/supp-imgs/brownish_noise/5/original.png">
+              <img src="images/supp-imgs/brownish_noise/1/original.png">
+              <div class="label mt-1 mb-1 has-text-centered has-text-weight-normal is-size-7">Source</div>
+            </div>
+            
+            <!-- Column 2 -->
+            <div class="column carousel-card-column">
+              <img src="images/supp-imgs/brownish_noise/2/corrupted.png">
+              <img src="images/supp-imgs/brownish_noise/4/corrupted.png">
+              <img src="images/supp-imgs/brownish_noise/5/corrupted.png">
+              <img src="images/supp-imgs/brownish_noise/1/corrupted.png">
+              <div class="label mt-1 mb-1 has-text-centered has-text-weight-normal is-size-7">Input</div>
+            </div>
+            
+            <!-- Column 3 -->
+            <div class="column carousel-card-column">
+              <img src="images/supp-imgs/brownish_noise/2/clipped.png">
+              <img src="images/supp-imgs/brownish_noise/4/clipped.png">
+              <img src="images/supp-imgs/brownish_noise/5/clipped.png">
+              <img src="images/supp-imgs/brownish_noise/1/clipped.png">
+              <div class="label mt-1 mb-1 has-text-centered has-text-weight-normal is-size-7">CODE</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Concentric Sine Waves Noise -->
+        <div class="item">
+          <div class="grid-container">
+            <!-- Title -->
+            <div class="mt-1 mb-1 has-text-centered has-text-weight-bold is-size-5" style="width: 100%; display: block;">
+              Concentric Sine Waves
+            </div>
+            <!-- Column 1 -->
+            <div class="column carousel-card-column">
+              <img src="images/supp-imgs/concentric_sine/1/original.png">
+              <img src="images/supp-imgs/concentric_sine/2/original.png">
+              <img src="images/supp-imgs/concentric_sine/3/original.png">
+              <img src="images/supp-imgs/concentric_sine/4/original.png">
+              <div class="label mt-1 mb-1 has-text-centered has-text-weight-normal is-size-7">Source</div>
+            </div>
+            
+            <!-- Column 2 -->
+            <div class="column carousel-card-column">
+              <img src="images/supp-imgs/concentric_sine/1/corrupted.png">
+              <img src="images/supp-imgs/concentric_sine/2/corrupted.png">
+              <img src="images/supp-imgs/concentric_sine/3/corrupted.png">
+              <img src="images/supp-imgs/concentric_sine/4/corrupted.png">
+              <div class="label mt-1 mb-1 has-text-centered has-text-weight-normal is-size-7">Input</div>
+            </div>
+            
+            <!-- Column 3 -->
+            <div class="column carousel-card-column">
+              <img src="images/supp-imgs/concentric_sine/1/clipped.png">
+              <img src="images/supp-imgs/concentric_sine/2/clipped.png">
+              <img src="images/supp-imgs/concentric_sine/3/clipped.png">
+              <img src="images/supp-imgs/concentric_sine/4/clipped.png">
+              <div class="label mt-1 mb-1 has-text-centered has-text-weight-normal is-size-7">CODE</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Fish-Eye Noise -->
+        <div class="item">
+          <div class="grid-container">
+            <!-- Title -->
+            <div class="mt-1 mb-1 has-text-centered has-text-weight-bold is-size-5" style="width: 100%; display: block;">
+              Fish-Eye
+            </div>
+            <!-- Column 1 -->
+            <div class="column carousel-card-column">
+              <img src="images/supp-imgs/fisheye/1/original.png">
+              <img src="images/supp-imgs/fisheye/2/original.png">
+              <img src="images/supp-imgs/fisheye/3/original.png">
+              <img src="images/supp-imgs/fisheye/4/original.png">
+              <div class="label mt-1 mb-1 has-text-centered has-text-weight-normal is-size-7">Source</div>
+            </div>
+            
+            <!-- Column 2 -->
+            <div class="column carousel-card-column">
+              <img src="images/supp-imgs/fisheye/1/corrupted.png">
+              <img src="images/supp-imgs/fisheye/2/corrupted.png">
+              <img src="images/supp-imgs/fisheye/3/corrupted.png">
+              <img src="images/supp-imgs/fisheye/4/corrupted.png">
+              <div class="label mt-1 mb-1 has-text-centered has-text-weight-normal is-size-7">Input</div>
+            </div>
+            
+            <!-- Column 3 -->
+            <div class="column carousel-card-column">
+              <img src="images/supp-imgs/fisheye/1/clipped.png">
+              <img src="images/supp-imgs/fisheye/2/clipped.png">
+              <img src="images/supp-imgs/fisheye/3/clipped.png">
+              <img src="images/supp-imgs/fisheye/4/clipped.png">
+              <div class="label mt-1 mb-1 has-text-centered has-text-weight-normal is-size-7">CODE</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Gaussian Blur Noise -->
+        <div class="item">
+          <div class="grid-container">
+            <!-- Title -->
+            <div class="mt-1 mb-1 has-text-centered has-text-weight-bold is-size-5" style="width: 100%; display: block;">
+              Gaussian Blur
+            </div>
+            <!-- Column 1 -->
+            <div class="column carousel-card-column">
+              <img src="images/supp-imgs/gauss/1/original.png">
+              <img src="images/supp-imgs/gauss/2/original.png">
+              <img src="images/supp-imgs/gauss/3/original.png">
+              <img src="images/supp-imgs/gauss/4/original.png">
+              <div class="label mt-1 mb-1 has-text-centered has-text-weight-normal is-size-7">Source</div>
+            </div>
+            
+            <!-- Column 2 -->
+            <div class="column carousel-card-column">
+              <img src="images/supp-imgs/gauss/1/corrupted.png">
+              <img src="images/supp-imgs/gauss/2/corrupted.png">
+              <img src="images/supp-imgs/gauss/3/corrupted.png">
+              <img src="images/supp-imgs/gauss/4/corrupted.png">
+              <div class="label mt-1 mb-1 has-text-centered has-text-weight-normal is-size-7">Input</div>
+            </div>
+            
+            <!-- Column 3 -->
+            <div class="column carousel-card-column">
+              <img src="images/supp-imgs/gauss/1/clipped.png">
+              <img src="images/supp-imgs/gauss/2/clipped.png">
+              <img src="images/supp-imgs/gauss/3/clipped.png">
+              <img src="images/supp-imgs/gauss/4/clipped.png">
+              <div class="label mt-1 mb-1 has-text-centered has-text-weight-normal is-size-7">CODE</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Pinch and Twirl Noise -->
+        <div class="item">
+          <div class="grid-container">
+            <!-- Title -->
+            <div class="mt-1 mb-1 has-text-centered has-text-weight-bold is-size-5" style="width: 100%; display: block;">
+              Pinch and Twirl
+            </div>
+            <!-- Column 1 -->
+            <div class="column carousel-card-column">
+              <img src="images/supp-imgs/pinch/1/original.png">
+              <img src="images/supp-imgs/pinch/2/original.png">
+              <img src="images/supp-imgs/pinch/3/original.png">
+              <img src="images/supp-imgs/pinch/4/original.png">
+              <div class="label mt-1 mb-1 has-text-centered has-text-weight-normal is-size-7">Source</div>
+            </div>
+            
+            <!-- Column 2 -->
+            <div class="column carousel-card-column">
+              <img src="images/supp-imgs/pinch/1/corrupted.png">
+              <img src="images/supp-imgs/pinch/2/corrupted.png">
+              <img src="images/supp-imgs/pinch/3/corrupted.png">
+              <img src="images/supp-imgs/pinch/4/corrupted.png">
+              <div class="label mt-1 mb-1 has-text-centered has-text-weight-normal is-size-7">Input</div>
+            </div>
+            
+            <!-- Column 3 -->
+            <div class="column carousel-card-column">
+              <img src="images/supp-imgs/pinch/1/clipped.png">
+              <img src="images/supp-imgs/pinch/2/clipped.png">
+              <img src="images/supp-imgs/pinch/3/clipped.png">
+              <img src="images/supp-imgs/pinch/4/clipped.png">
+              <div class="label mt-1 mb-1 has-text-centered has-text-weight-normal is-size-7">CODE</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Pixelate Noise -->
+        <div class="item">
+          <div class="grid-container">
+            <!-- Title -->
+            <div class="mt-1 mb-1 has-text-centered has-text-weight-bold is-size-5" style="width: 100%; display: block;">
+              Pixelate
+            </div>
+            <!-- Column 1 -->
+            <div class="column carousel-card-column">
+              <img src="images/supp-imgs/pixelate/1/original.png">
+              <img src="images/supp-imgs/pixelate/2/original.png">
+              <img src="images/supp-imgs/pixelate/3/original.png">
+              <img src="images/supp-imgs/pixelate/4/original.png">
+              <div class="label mt-1 mb-1 has-text-centered has-text-weight-normal is-size-7">Source</div>
+            </div>
+            
+            <!-- Column 2 -->
+            <div class="column carousel-card-column">
+              <img src="images/supp-imgs/pixelate/1/corrupted.png">
+              <img src="images/supp-imgs/pixelate/2/corrupted.png">
+              <img src="images/supp-imgs/pixelate/3/corrupted.png">
+              <img src="images/supp-imgs/pixelate/4/corrupted.png">
+              <div class="label mt-1 mb-1 has-text-centered has-text-weight-normal is-size-7">Input</div>
+            </div>
+            
+            <!-- Column 3 -->
+            <div class="column carousel-card-column">
+              <img src="images/supp-imgs/pixelate/1/clipped.png">
+              <img src="images/supp-imgs/pixelate/2/clipped.png">
+              <img src="images/supp-imgs/pixelate/3/clipped.png">
+              <img src="images/supp-imgs/pixelate/4/clipped.png">
+              <div class="label mt-1 mb-1 has-text-centered has-text-weight-normal is-size-7">CODE</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Scatter Noise -->
+        <div class="item">
+          <div class="grid-container">
+            <!-- Title -->
+            <div class="mt-1 mb-1 has-text-centered has-text-weight-bold is-size-5" style="width: 100%; display: block;">
+              Scatter
+            </div>
+            <!-- Column 1 -->
+            <div class="column carousel-card-column">
+              <img src="images/supp-imgs/scatter/1/original.png">
+              <img src="images/supp-imgs/scatter/2/original.png">
+              <img src="images/supp-imgs/scatter/3/original.png">
+              <img src="images/supp-imgs/scatter/4/original.png">
+              <div class="label mt-1 mb-1 has-text-centered has-text-weight-normal is-size-7">Source</div>
+            </div>
+            
+            <!-- Column 2 -->
+            <div class="column carousel-card-column">
+              <img src="images/supp-imgs/scatter/1/corrupted.png">
+              <img src="images/supp-imgs/scatter/2/corrupted.png">
+              <img src="images/supp-imgs/scatter/3/corrupted.png">
+              <img src="images/supp-imgs/scatter/4/corrupted.png">
+              <div class="label mt-1 mb-1 has-text-centered has-text-weight-normal is-size-7">Input</div>
+            </div>
+            
+            <!-- Column 3 -->
+            <div class="column carousel-card-column">
+              <img src="images/supp-imgs/scatter/1/clipped.png">
+              <img src="images/supp-imgs/scatter/2/clipped.png">
+              <img src="images/supp-imgs/scatter/3/clipped.png">
+              <img src="images/supp-imgs/scatter/4/clipped.png">
+              <div class="label mt-1 mb-1 has-text-centered has-text-weight-normal is-size-7">CODE</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Water Drop Noise -->
+        <div class="item">
+          <div class="grid-container">
+            <!-- Title -->
+            <div class="mt-1 mb-1 has-text-centered has-text-weight-bold is-size-5" style="width: 100%; display: block;">
+              Water Drop
+            </div>
+
+            <!-- Column 1 -->
+            <div class="column carousel-card-column">
+              <img src="images/supp-imgs/water/1/original.png">
+              <img src="images/supp-imgs/water/2/original.png">
+              <img src="images/supp-imgs/water/3/original.png">
+              <img src="images/supp-imgs/water/4/original.png">
+              <div class="label mt-1 mb-1 has-text-centered has-text-weight-normal is-size-7">Source</div>
+            </div>
+            
+            <!-- Column 2 -->
+            <div class="column carousel-card-column">
+              <img src="images/supp-imgs/water/1/corrupted.png">
+              <img src="images/supp-imgs/water/2/corrupted.png">
+              <img src="images/supp-imgs/water/3/corrupted.png">
+              <img src="images/supp-imgs/water/4/corrupted.png">
+              <div class="label mt-1 mb-1 has-text-centered has-text-weight-normal is-size-7">Input</div>
+            </div>
+            
+            <!-- Column 3 -->
+            <div class="column carousel-card-column">
+              <img src="images/supp-imgs/water/1/clipped.png">
+              <img src="images/supp-imgs/water/2/clipped.png">
+              <img src="images/supp-imgs/water/3/clipped.png">
+              <img src="images/supp-imgs/water/4/clipped.png">
+              <div class="label mt-1 mb-1 has-text-centered has-text-weight-normal is-size-7">CODE</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    <!-- </div> -->
+  </div>
+</section>
+
+<section class="section" id="BibTeX">
+  <div class="container is-max-desktop content">
+    <h2 class="title">BibTeX</h2>
+    <pre><code>
+@misc{liu2023improvedllava,
+        author={Liu, Haotian and Li, Chunyuan and Li, Yuheng and Lee, Yong Jae},
+        title={Improved Baselines with Visual Instruction Tuning}, 
+        publisher={arXiv:2310.03744},
+        year={2023},
+}
+
+@inproceedings{liu2023llava,
+  author      = {Liu, Haotian and Li, Chunyuan and Wu, Qingyang and Lee, Yong Jae},
+  title       = {Visual Instruction Tuning},
+  booktitle   = {NeurIPS},
+  year        = {2023}
+}
+</code></pre>
+  </div>
+</section>
+  
+<footer class="footer">
+    <div class="container is-max-desktop content has-text-centered">
+      <a class="icon-link"
+         href="https://arxiv.org/pdf/...">
+        <i class="fas fa-file-pdf"></i>
+      </a>
+      <a class="icon-link" href="https://github.com/vita-epfl/CODE" class="external-link" disabled>
+        <i class="fab fa-github"></i>
+      </a>
+      <h2 class="title">Acknowledgement</h2>
+      <p>
+        This website is adapted from <a
+        href="https://github.com/nerfies/nerfies.github.io">Nerfies</a> and <a href="https://llava-vl.github.io/">LLaVA</a>, licensed under a <a rel="license" href="http://creativecommons.org/licenses/by-sa/4.0/">Creative
+          Commons Attribution-ShareAlike 4.0 International License</a>.
+          <br/>
+          <a href="https://www.flaticon.com/free-icons/edit-image" title="edit image icons">Edit image icons created by gungyoga04 - Flaticon</a>, <a href="https://www.flaticon.com/free-icons/drawing" title="drawing icons">Drawing icons created by Freepik - Flaticon</a>, <a href="https://www.flaticon.com/free-icons/rating" title="rating icons">Rating icons created by Freepik - Flaticon</a>, <a href="https://www.flaticon.com/free-icons/experiment-results" title="experiment results icons">Experiment results icons created by DinosoftLabs - Flaticon</a>, <a href="https://www.flaticon.com/free-icons/example" title="example icons">Example icons created by Freepik - Flaticon</a>
+        </p>
+        
+        <p>
+          <b>Usage and License Notices</b>: 
+        </p>    
+      </div>
+    </div>
+</footer>
+    
+</body>
+
+</html>

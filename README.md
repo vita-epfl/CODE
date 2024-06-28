@@ -1,4 +1,9 @@
-# ODEdit: Towards Robust Guided Image Generation
+# CODE: Confident Ordinary Differential Editing
+
+<a target="_blank" href="https://colab.research.google.com/github/vita-epfl/CODE/blob/main/ODEdit.ipynb">
+  <img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Open In Colab"/>
+</a>
+
 
 Official PyTorch implementation of ODEdit: Towards Robust Guided Image Generation.
 
