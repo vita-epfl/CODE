@@ -248,8 +248,20 @@
     <div class="column is-full-width">
       <div class="content has-text-justified">  
         <p>
-          $$x = 13$$ thsi is math mode.
+          Our approach, illustrated in Figure 2, provides a theoretically grounded method for mapping Out-of-Distribution (OoD) samples to in-distribution ones. The process involves the following steps:
         </p>
+        <ol>
+          <li><b>Inversion of the Probability-Flow Ordinary Differential Equation (ODE)</b>: Inspired by SDEdit, we invert the diffusion process by avoiding the injection of extra noise, thus maintaining the fidelity of the reconstructed image. This inversion process ensures precise image reconstruction, limited only by approximation errors.</li>
+          <li><b>Langevin Dynamics in Latent Spaces</b>: Utilizing Langevin dynamics within the latent spaces allows for gradient updates that increase the likelihood of the latent representation. This method can be tailored to prioritize either realism or fidelity by selecting the step size in the Langevin dynamics and the latent space for optimization.</li>
+        </ol>
+        <p>
+          The primary motivation for inverting the degraded image is the model's ability to process OoD images. Direct estimation of the score on degraded images is impractical due to poor performance on OoD data. By mapping the corrupted input back to the latent space, we obtain more accurate estimates within a distribution closely resembling a multivariate Gaussian.
+        </p>
+        <p>
+          This method, detailed in Algorithm 1 in the paper, decouples noise injection levels, correction levels, and latent spaces, enhancing control over the editing process. Our experimental results show CODE’s superiority over SDEdit in realism and fidelity, especially in challenging scenarios.
+        </p>
+      </div>
+
       </div>
     </div>
   </div>
@@ -271,11 +283,36 @@
 
   <div class="columns is-centered">
     <div class="column is-full-width">
-      <div class="content has-text-justified"> 
+      <div class="content has -text-justified">  
         <p>
-          Some other text
+          We introduce a confidence-based clipping method for the latent codes that does not depend on the prediction nor the original sample. This method leverages the cumulative distribution function of a standard normal distribution to define confidence intervals for clipping latent codes during the encoding process.
+        </p>
+        <p>
+          <b>Proposition 1</b>: Let Φ be the cumulative distribution function of N(0, I) and let \( x_0 \in [-1, 1] \). For \( \alpha_t \in [0, 1] \), ∀ \( t \in [0, 1] \), assume that \( x_t \sim N(\sqrt{\alpha_t} \cdot \alpha_0, \sqrt{1 - \alpha_t} \cdot I) \). Then, for all \( \eta \):
+        </p>
+        <p style="text-align:center;">
+          \( P(x_t \in [ -\sqrt{\alpha_t} - \eta \cdot \sqrt{1 - \alpha_t}, \sqrt{\alpha_t} + \eta \cdot \sqrt{1 - \alpha_t} ]) \geq \Phi(\eta) - \Phi(-η) \).
+        </p>
+        <p>
+          Specifically, for \( \eta = 2 \):
+        </p>
+        <p style="text-align:center;">
+          \( P(x_t \in [ -\sqrt{\alpha_t} - 2 \cdot \sqrt{1 - \alpha_t}, \sqrt{\alpha_t} + 2 \cdot \sqrt{1 - \alpha_t} ]) \geq 0.95 \).
+        </p>
+        <p>
+          During the encoding process, we propose to clip the latent codes using a confidence interval derived from Proposition 1:
+        </p>
+        <p style="text-align:center;">
+          \( x^{clipped}_{t} = Clip(x_t, min = -\sqrt{\alpha_t} - \eta \cdot \sqrt{1 - \alpha_t}, max = \sqrt{\alpha_t} + \eta \cdot \sqrt{1 - \alpha_t}) \),
+        </p>
+        <p>
+          where \( t \) is the timestep, \( \alpha_t \) is the predefined schedule of the diffusion model, and \( \eta \) is the chosen confidence parameter.
+        </p>
+        <p>
+          Similar to our editing method, CBC is agnostic to the input and suitable for blind restoration scenarios. Combining CBC with our ODE editing method forms the complete CODE method. The two methods synergize efficiently, enhancing the restoration process in a blind manner.
         </p>
       </div>
+
     </div>
   </div>
 
@@ -302,10 +339,24 @@
   <!-- Grounedtext2img. -->
   <div class="columns is-centered">
     <div class="column is-full-width">
-      
-      <div>
-        div
+      <div class="content has-text-justified">
+        <p>
+          We conducted extensive experiments to evaluate the performance of CODE across various corruption types. The experiments were carried out on multiple datasets, including CelebA-HQ, LSUN-Bedroom, and LSUN-Church, all at 256x256 resolution. Our setup utilized open-source pre-trained DDPM models and followed the DDIM inversion method with 200 steps.
+        </p>
+        <p>
+          <b>Experimental Setup</b>: We tested our approach on 49 corruption types, including noise, blur, weather, and digital artifacts. The corruption datasets are publicly available and were used to benchmark the performance of CODE against existing methods.
+        </p>
+        <p>
+          The results, also available below, demonstrate CODE's effectiveness over existing methods. CODE significantly improves performance on complex corruptions like Fog and Contrast, where other baselines show lower versatility and require extra training.
+        </p>
+        <p style="text-align:center;">
+          <img id="arch" width="60%" src="images/code_performance.png" style="display: inline; padding-bottom: 10pt;">
+        </p>
+        <p>
+          Our evaluation shows that CODE consistently produces high-quality restorations across diverse and severe corruptions, achieving superior realism and fidelity compared to SDEdit and other baselines.
+        </p>
       </div>
+
 
     </div>
   </div>
