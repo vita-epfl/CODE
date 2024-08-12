@@ -5,7 +5,7 @@
 </a>
 
 
-Official PyTorch implementation of ODEdit: Towards Robust Guided Image Generation.
+Official PyTorch implementation of CODE: Confident Ordinary Differential Editing.
 
 The provided notebook is self-contained, including the installation of all the packages required and the ODEdit algorithm itself.
 
