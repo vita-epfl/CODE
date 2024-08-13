@@ -7,7 +7,7 @@
 
 Official PyTorch implementation of CODE: Confident Ordinary Differential Editing.
 
-The provided notebook is self-contained, including the installation of all the packages required and the ODEdit algorithm itself.
+The provided notebook is self-contained, including the installation of all the packages required and the CODE algorithm itself.
 
 
 ## Requirements
