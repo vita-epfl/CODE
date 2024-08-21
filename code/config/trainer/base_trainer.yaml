@@ -1,0 +1,35 @@
+name: base_trainer
+type: base
+platform: local
+
+random_seed: false
+seed: 0
+
+# This folder should be accessible by all nodes
+results_dir: results
+exp_name_folder: base
+
+use_clearml: false
+use_wandb: true
+wandb_entity: 
+ml_exp_name: DummyExp
+
+# Mode slurm
+slurm:
+  nodes: 1 # 2
+  gpus_per_node: 1  # max 2
+  cpus_per_task: 10
+  mem: 0 # in GiB 48
+  timeout: 48 # hours
+  partition: gpu
+  qos: gpu
+  account:  # optional
+
+
+# INTERNAL
+logdir: ${trainer.results_dir}/${trainer.name}_${dataset.name}
+sync_key: ${now:%Y-%m-%d_%H-%M}
+base_dir: ${trainer.logdir}
+
+# Default Checkpointpath
+checkpointpath : ${trainer.logdir}/checkpoint.pt
