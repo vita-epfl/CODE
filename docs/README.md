@@ -9,7 +9,7 @@ Official PyTorch implementation of **CODE: Confident Ordinary Differential Editi
 
 <p align="center">
 <img src="https://github.com/vita-epfl/CODE/blob/main/docs/images/main_figure.png" style="width: 50%"/>
-<img src="https://github.com/vita-epfl/CODE/blob/main/docs/images/CODE.gif" style="width: 92%"/>
+<img src="https://github.com/vita-epfl/CODE/blob/main/docs/images/CODE.gif" style="width: 70%"/>
 </p>
 
 ## Overview
