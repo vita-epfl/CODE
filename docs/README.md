@@ -5,7 +5,7 @@
   <img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Open In Colab"/>
 </a>
 
-Official PyTorch implementation of **CODE: Confident Ordinary Differential Editing** (2024).
+Official PyTorch implementation of **CODE: Confident Ordinary Differential Editing** (AAAI 2025).
 
 <p align="center">
 <img src="https://github.com/vita-epfl/CODE/blob/main/docs/images/main_figure.png" style="width: 50%"/>
